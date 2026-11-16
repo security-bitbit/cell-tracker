@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>기지국 위치추적 시스템</title>
+
+    <!-- ===================================================================== -->
+    <!-- ★ [1순위 설정] 카카오 JavaScript 키, 현재 버전, 업데이트 내역(패치노트) 관리 ★ -->
+    <script>
+        const KAKAO_JS_KEY = "caa681154d90620b4a0281f6eca12a6f";
+        const APP_VERSION  = "v1.0.0"; // 업데이트 배포 시 이 버전을 올리면 사용자에게 패치노트가 자동 안내됩니다.
+        const REPORT_EMAIL = "coool@police.go.kr";
+
+        // ★ 업데이트할 때마다 맨 위에 새 버전 블록을 하나씩 추가해 주세요!
+        const UPDATE_HISTORY = [
+            {
+                version: "v1.0.0",
+                date: "2026.11.16",
+                isLatest: true,
+                changes: [
+                    "기지국 위치추적 시스템 최초 정식 배포",
+                    "다중 전화번호(뒷 4자리 / 전체 번호) 자동 분류 및 색상별 동선 표시",
+                    "동일 기지국(PCI) 연속 수신 시 체류 시간 자동 합산 기능",
+                    "단말기 (전원 꺼짐) 감지 시 경과 시간 실시간 카운트 및 재부팅 기록",
+                    "기지국 마커 터치 시 과거 방문·체류 이력 요약 팝업 제공"
+                ]
+            }
+            /* 추후 v1.1.0 업데이트 시 아래 주석처럼 맨 위에 추가하시면 됩니다.
+            ,{
+                version: "v1.1.0",
+                date: "2026.12.01",
+                isLatest: true,
+                changes: [
+                    "신규 통신사 문자 양식 추가 대응",
+                    "기타 UI 개선 및 버그 수정"
+                ]
+            }
+            */
+        ];
+    </script>
+    <!-- ===================================================================== -->
+
+    <style>
+        :root {
+            --bg-dark: #071018;
+            --panel-bg: #0a1622;
+            --neon-cyan: #00e5ff;
+            --neon-green: #00e676;
+            --neon-red: #ff1744;
+            --neon-amber: #ffab00;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--neon-cyan);
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            height: 100vh;
+            height: 100dvh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* 1. 상단 헤더 (모바일에서도 절대 줄바꿈되지 않고 슬림한 높이 유지) */
+        header {
+            background: linear-gradient(90deg, #06111a 0%, #0d273d 50%, #06111a 100%);
+            border-bottom: 1px solid var(--neon-cyan);
+            padding: 6px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+            flex-shrink: 0;
+            z-index: 100;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            overflow: visible;
+            padding-left: 2px;
+        }
+        .radar-dot {
+            width: 9px; height: 9px;
+            margin-left: 3px;
+            background: var(--neon-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--neon-green);
+            animation: pulse 1.4s infinite;
+            flex-shrink: 0;
+        }
+        .radar-dot.offline {
+            background: var(--neon-red);
+            box-shadow: 0 0 8px var(--neon-red);
+            animation: none;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.35); opacity: 0.4; }
+        }
+        /* 제목+버전(윗줄) / 제작자(아랫줄) 2단 고정 구조로 상단바 굵어짐 방지 */
+        .brand-stack {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+        }
+        .brand-top-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .brand-title {
+            font-size: 14px;
+            font-weight: 900;
+            letter-spacing: -0.2px;
+            color: #ffffff;
+            white-space: nowrap;
+        }
+        .ver-badge {
+            background: rgba(0, 229, 255, 0.16);
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            font-size: 9.5px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ver-badge:active { background: var(--neon-cyan); color: #000; }
+        .brand-sub {
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--neon-green);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 1px;
+        }
+        .top-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        /* 2. 상단 상황판 바 */
+        .kpi-bar {
+            display: grid;
+            grid-template-columns: 0.8fr 1.4fr 0.9fr 0.9fr;
+            gap: 5px;
+            padding: 5px 8px;
+            background: #060f17;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.25);
+            flex-shrink: 0;
+            z-index: 100;
+        }
+        .kpi-card {
+            background: rgba(0, 229, 255, 0.06);
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            border-left: 3px solid var(--neon-cyan);
+            padding: 4px 6px;
+            overflow: hidden;
+        }
+        .kpi-card.status-card { border-left-color: var(--neon-green); }
+        .kpi-card.status-card.offline { border-left-color: var(--neon-red); background: rgba(255, 23, 68, 0.1); }
+        .kpi-label { font-size: 10px; color: #8ab8cc; white-space: nowrap; }
+        .kpi-val {
+            font-size: 11.5px;
+            font-weight: bold;
+            color: #fff;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            letter-spacing: -0.3px;
+        }
+
+        /* 2-1. 다중 전화번호(뒷 4자리) 필터 바 */
+        #phone-filter-bar {
+            background: #040b11;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.25);
+            padding: 5px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            z-index: 100;
+            scrollbar-width: none;
+        }
+        #phone-filter-bar::-webkit-scrollbar { display: none; }
+        .phone-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1.5px solid #475569;
+            color: #cbd5e1;
+            padding: 4px 8px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: bold;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .phone-chip.selected {
+            background: rgba(0, 229, 255, 0.18);
+            border-color: var(--neon-cyan);
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+        }
+        .phone-chip.hidden-on-map {
+            opacity: 0.45;
+            text-decoration: line-through;
+        }
+        .phone-color-dot {
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+            border: 1px solid #fff;
+        }
+        .phone-vis-btn {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #fff;
+            border-radius: 10px;
+            padding: 1px 5px;
+            font-size: 10px;
+            cursor: pointer;
+            margin-left: 2px;
+        }
+
+        /* 3. 메인 카카오맵 영역 */
+        #map-container {
+            position: relative;
+            flex: 1;
+            min-height: 180px;
+            width: 100%;
+            background: #e9ecef;
+            overflow: hidden;
+        }
+        #map { width: 100%; height: 100%; }
+
+        /* 지도 좌측 상단: 반경 / 이동동선 / 경유지 라벨 스위치 */
+        .map-layer-controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 5px;
+            z-index: 450;
+            flex-wrap: wrap;
+            max-width: calc(100% - 60px);
+        }
+        .layer-toggle-btn {
+            background: rgba(10, 22, 34, 0.92);
+            border: 1.5px solid #0055ff;
+            color: #ffffff;
+            padding: 5px 9px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .layer-toggle-btn.off {
+            background: rgba(255, 255, 255, 0.92);
+            border-color: #adb5bd;
+            color: #495057;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 우측 하단 줌/포커스 조작 버튼 */
+        .map-fab-group {
+            position: absolute;
+            right: 10px;
+            bottom: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 450;
+        }
+        .fab-btn {
+            width: 38px; height: 38px;
+            background: rgba(10, 22, 34, 0.92);
+            border: 1.5px solid var(--neon-cyan);
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+        }
+        .fab-btn:active { background: var(--neon-cyan); color: #000; }
+
+        /* 지도 연결 안내 오버레이 */
+        #map-status-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, #071926 0%, #03070b 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+            text-align: center;
+            z-index: 500;
+        }
+        .status-box {
+            border: 1px solid var(--neon-amber);
+            background: rgba(15, 25, 35, 0.95);
+            padding: 16px;
+            max-width: 520px;
+            width: 100%;
+            box-shadow: 0 0 20px rgba(255, 184, 0, 0.2);
+        }
+        .status-title { color: var(--neon-amber); font-weight: bold; font-size: 14px; margin-bottom: 8px; }
+        .status-text { color: #d0ecf5; font-size: 12px; line-height: 1.6; text-align: left; }
+
+        /* ===== 0x0 영점 고정 마커 ===== */
+        .tactical-node {
+            position: relative;
+            width: 0px;
+            height: 0px;
+            cursor: pointer;
+        }
+        .node-core {
+            position: absolute;
+            top: 0; left: 0;
+            width: 14px; height: 14px;
+            margin-top: -7px;
+            margin-left: -7px;
+            border-radius: 50%;
+            background: var(--target-color, #0055ff);
+            border: 2.5px solid #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+            z-index: 3;
+            cursor: pointer;
+        }
+        .ripple-ring {
+            position: absolute;
+            top: 0; left: 0;
+            width: 18px; height: 18px;
+            margin-top: -9px;
+            margin-left: -9px;
+            border-radius: 50%;
+            border: 2.5px solid var(--target-color, #0055ff);
+            background: transparent;
+            opacity: 0;
+            pointer-events: none;
+            animation: sonarWave 2.4s cubic-bezier(0.1, 0.5, 0.3, 1) infinite;
+        }
+        .ripple-ring.delay-1 { animation-delay: 0.8s; }
+        .ripple-ring.delay-2 { animation-delay: 1.6s; }
+
+        @keyframes sonarWave {
+            0% { transform: scale(0.5); opacity: 0.95; }
+            100% { transform: scale(5.5); opacity: 0; }
+        }
+
+        .node-label {
+            position: absolute;
+            bottom: 14px;
+            left: 0;
+            transform: translateX(-50%);
+            background: rgba(10, 22, 36, 0.94);
+            color: #ffffff;
+            border: 2px solid var(--target-color, #0055ff);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            white-space: nowrap;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+            z-index: 4;
+            text-align: center;
+            line-height: 1.35;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .node-label:hover {
+            transform: translateX(-50%) scale(1.04);
+            z-index: 999;
+        }
+        .node-label .sub-time {
+            display: block;
+            font-size: 10px;
+            color: #ffea00;
+            margin-top: 1px;
+        }
+        .node-label .phone-mini {
+            display: inline-block;
+            background: var(--target-color, #0055ff);
+            color: #fff;
+            font-size: 9.5px;
+            padding: 0px 4px;
+            border-radius: 3px;
+            margin-right: 3px;
+        }
+        .node-label .stay-badge {
+            display: inline-block;
+            background: #00e676;
+            color: #000;
+            font-size: 9.5px;
+            padding: 0px 4px;
+            border-radius: 3px;
+            margin-left: 3px;
+        }
+        .node-label .revisit-badge {
+            display: inline-block;
+            background: #ffab00;
+            color: #000;
+            font-size: 9.5px;
+            padding: 0px 4px;
+            border-radius: 3px;
+            margin-left: 3px;
+        }
+
+        .node-mini-badge {
+            display: none;
+            position: absolute;
+            bottom: 8px;
+            left: 0;
+            transform: translateX(-50%);
+            background: var(--target-color, #1e293b);
+            color: #fff;
+            border: 1.5px solid #fff;
+            padding: 1px 5px;
+            border-radius: 10px;
+            font-size: 9.5px;
+            font-weight: bold;
+            white-space: nowrap;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+            z-index: 3;
+        }
+
+        .tactical-node.past .node-core {
+            width: 11px; height: 11px;
+            margin-top: -5.5px;
+            margin-left: -5.5px;
+            background: var(--target-color, #1e293b);
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }
+        .tactical-node.past .node-label {
+            bottom: 10px;
+            font-size: 10px;
+            padding: 3px 7px;
+            background: rgba(20, 30, 45, 0.92);
+            border: 1.5px solid var(--target-color, #475569);
+            color: #f1f5f9;
+        }
+
+        #map-container.compact-past-labels .tactical-node.past .node-label { display: none; }
+        #map-container.compact-past-labels .tactical-node.past .node-mini-badge { display: block; }
+        #map-container.compact-past-labels .tactical-node.past:hover .node-label { display: block; z-index: 999; }
+
+        .tactical-node.offline .node-core {
+            width: 14px; height: 14px;
+            margin-top: -7px;
+            margin-left: -7px;
+            background: #e6003d;
+            border: 2px solid #ffffff;
+            border-radius: 3px;
+            transform: rotate(45deg);
+            box-shadow: 0 2px 8px rgba(230, 0, 61, 0.7);
+        }
+        .tactical-node.offline .node-label {
+            bottom: 14px;
+            background: rgba(55, 8, 20, 0.96);
+            border: 2px solid #ff1744;
+            color: #ffffff;
+            box-shadow: 0 3px 12px rgba(230, 0, 61, 0.45);
+        }
+        .tactical-node.offline .node-label .sub-time { color: #ffab00; }
+
+        /* ===== 모달 공통 스타일 (체류이력 팝업 & 업데이트 내역/제보 팝업) ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.72);
+            z-index: 9500;
+            justify-content: center;
+            align-items: center;
+            padding: 14px;
+        }
+        .modal-card {
+            background: #0b1926;
+            border: 2px solid var(--neon-cyan);
+            border-radius: 8px;
+            max-width: 460px;
+            width: 100%;
+            padding: 15px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.65);
+            color: #fff;
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.3);
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .modal-title { font-size: 14px; font-weight: bold; color: var(--neon-cyan); }
+        .modal-close {
+            background: transparent;
+            border: 1px solid #689fb8;
+            color: #b8dce8;
+            padding: 3px 8px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .history-addr { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 4px; }
+        .history-summary { font-size: 11.5px; color: var(--neon-amber); margin-bottom: 10px; font-weight: bold; }
+        .visit-list {
+            max-height: 240px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .visit-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid var(--neon-green);
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            line-height: 1.5;
+        }
+        .visit-item.off-visit { border-left-color: var(--neon-red); }
+
+        /* 제보 & 업데이트 내역 모달 내부 탭 */
+        .modal-tab-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+        .modal-tab-btn {
+            background: #061018;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            color: #8ab8cc;
+            padding: 7px;
+            font-size: 12px;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .modal-tab-btn.active {
+            background: rgba(0, 229, 255, 0.18);
+            border-color: var(--neon-cyan);
+            color: #fff;
+        }
+
+        /* 패치노트(업데이트 내역) 타임라인 스타일 */
+        .changelog-list {
+            overflow-y: auto;
+            max-height: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 2px;
+            margin-bottom: 12px;
+        }
+        .changelog-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            border-left: 3px solid var(--neon-cyan);
+            border-radius: 5px;
+            padding: 10px 12px;
+        }
+        .changelog-card.latest {
+            border-left-color: var(--neon-green);
+            background: rgba(0, 230, 118, 0.06);
+        }
+        .cl-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .cl-ver { font-size: 13px; font-weight: bold; color: #fff; }
+        .cl-badge-new {
+            background: var(--neon-green);
+            color: #000;
+            font-size: 9.5px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 5px;
+        }
+        .cl-date { font-size: 10.5px; color: #8ab8cc; }
+        .cl-items {
+            list-style: none;
+            font-size: 11.5px;
+            color: #d8ecf5;
+            line-height: 1.55;
+        }
+        .cl-items li {
+            position: relative;
+            padding-left: 10px;
+            margin-bottom: 3px;
+        }
+        .cl-items li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: var(--neon-cyan);
+        }
+
+        /* 제보 폼 스타일 */
+        .feedback-info-box {
+            background: rgba(0, 229, 255, 0.06);
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            border-radius: 6px;
+            padding: 9px 11px;
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: #d0ecf5;
+            margin-bottom: 10px;
+        }
+        .email-copy-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #050d14;
+            border: 1px solid var(--neon-amber);
+            padding: 7px 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .email-text {
+            font-size: 13px;
+            font-weight: bold;
+            color: var(--neon-amber);
+            user-select: text;
+        }
+        .feedback-select, .feedback-textarea {
+            width: 100%;
+            background: #040a10;
+            border: 1px solid rgba(0, 229, 255, 0.4);
+            color: #fff;
+            padding: 7px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            outline: none;
+        }
+        .feedback-textarea {
+            height: 74px;
+            resize: none;
+        }
+
+        /* 4. 하단 컨트롤 패널 (찌그러지던 하단 푸터를 제거하고 깔끔하게 정돈) */
+        #bottom-panel {
+            height: 43%;
+            min-height: 195px;
+            max-height: 75%;
+            background: var(--panel-bg);
+            border-top: 2px solid var(--neon-cyan);
+            box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+            display: flex;
+            flex-direction: column;
+            padding: 6px 10px 8px 10px;
+            gap: 6px;
+            transition: height 0.25s ease, min-height 0.25s ease;
+            flex-shrink: 0;
+            z-index: 200;
+        }
+        #bottom-panel.collapsed {
+            height: 84px;
+            min-height: 84px;
+        }
+        #bottom-panel.collapsed .log-grid,
+        #bottom-panel.collapsed .mobile-tabs {
+            display: none !important;
+        }
+
+        .sheet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .mobile-tabs { display: none; gap: 4px; }
+        .tab-btn {
+            background: #041019;
+            color: #689fb8;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .tab-btn.active {
+            background: rgba(0, 229, 255, 0.18);
+            color: var(--neon-cyan);
+            border-color: var(--neon-cyan);
+        }
+
+        .toolbar { display: flex; gap: 5px; flex-shrink: 0; }
+        .input-group { display: flex; flex: 1; gap: 5px; width: 100%; }
+        .sms-input {
+            flex: 1;
+            min-width: 0;
+            background: #03080d;
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-green);
+            padding: 8px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            border-radius: 3px;
+            outline: none;
+        }
+        .btn {
+            background: rgba(0, 229, 255, 0.14);
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 5px 9px;
+            font-size: 11px;
+            font-weight: bold;
+            font-family: inherit;
+            border-radius: 4px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .btn:active { background: var(--neon-cyan); color: #000; }
+        .btn-green { border-color: var(--neon-green); color: var(--neon-green); background: rgba(0, 230, 118, 0.14); }
+        .btn-amber { border-color: var(--neon-amber); color: var(--neon-amber); background: rgba(255, 171, 0, 0.14); }
+
+        .log-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 8px;
+            overflow: hidden;
+            min-height: 0;
+        }
+        #target-list, #sys-console {
+            background: #04090e;
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            overflow-y: auto;
+            padding: 6px;
+            font-size: 11px;
+            border-radius: 3px;
+        }
+        #sys-console { color: var(--neon-green); font-size: 11px; line-height: 1.5; }
+
+        .target-card {
+            border-left: 4px solid var(--neon-cyan);
+            background: linear-gradient(90deg, rgba(0, 229, 255, 0.08) 0%, rgba(0, 229, 255, 0.02) 100%);
+            border-top: 1px solid rgba(0, 229, 255, 0.2);
+            border-right: 1px solid rgba(0, 229, 255, 0.2);
+            border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            border-radius: 3px;
+        }
+        .target-card.offline-card {
+            border-left-color: var(--neon-red) !important;
+            background: linear-gradient(90deg, rgba(255, 23, 68, 0.18) 0%, rgba(255, 171, 0, 0.05) 100%);
+            border-color: rgba(255, 23, 68, 0.4);
+        }
+        .t-badge { color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold; margin-right: 5px; border-radius: 3px; }
+        .t-phone-tag {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 6px;
+            border-radius: 3px;
+            margin-right: 5px;
+            color: #fff;
+        }
+        .t-status-tag {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 2px;
+            margin-right: 5px;
+        }
+        .t-status-tag.on { color: var(--neon-green); border: 1px solid var(--neon-green); }
+        .t-status-tag.off { color: #ffab00; background: rgba(255, 23, 68, 0.25); border: 1px solid var(--neon-red); }
+        .t-addr { color: #fff; font-weight: bold; font-size: 12px; word-break: keep-all; }
+        .t-meta { color: #9ad8ed; font-size: 11px; margin-top: 4px; line-height: 1.4; }
+        .t-links { display: flex; gap: 5px; flex-shrink: 0; }
+        .t-links a {
+            text-decoration: none;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 6px 8px;
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            background: #04121c;
+            border-radius: 3px;
+        }
+        .t-links a:active { background: var(--neon-cyan); color: #000; }
+
+        @media (max-width: 768px) {
+            .brand-title { font-size: 13px; }
+            .brand-sub { font-size: 9.5px; }
+            .top-actions .btn { padding: 5px 7px; font-size: 10.5px; }
+            .mobile-tabs { display: flex; }
+            .log-grid { grid-template-columns: 1fr; }
+            #sys-console { display: none; }
+            #sys-console.mobile-show { display: block; }
+            #target-list.mobile-hide { display: none; }
+            .target-card { flex-direction: column; align-items: flex-start; }
+            .t-links { width: 100%; justify-content: flex-end; margin-top: 4px; }
+            .t-links a { flex: 1; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. 상단 헤더 (2단 고정 구조로 모바일에서도 절대 굵어지지 않음) -->
+    <header>
+        <div class="brand">
+            <div class="radar-dot" id="header-dot"></div>
+            <div class="brand-stack">
+                <div class="brand-top-row">
+                    <span class="brand-title">기지국 위치추적 시스템</span>
+                    <span class="ver-badge" id="header-ver-badge" onclick="openInfoModal('changelog')" title="업데이트 내역 확인">v1.0.0</span>
+                </div>
+                <div class="brand-sub">인천계양경찰서 황시원 순경 제작</div>
+            </div>
+        </div>
+        <div class="top-actions">
+            <button class="btn btn-amber" onclick="openInfoModal('feedback')">💌 제보</button>
+            <button class="btn btn-green" id="sound-btn" onclick="toggleSound()">🔊 알림</button>
+            <button class="btn" onclick="clearAllTargets()">초기화</button>
+        </div>
+    </header>
+
+    <!-- 2. 상단 한국어 상황판 -->
+    <div class="kpi-bar">
+        <div class="kpi-card">
+            <div class="kpi-label" id="kpi-count-label">포착 기지국</div>
+            <div class="kpi-val" id="kpi-count">0 개소</div>
+        </div>
+        <div class="kpi-card status-card" id="kpi-status-card">
+            <div class="kpi-label">단말기 상태 / 체류·꺼짐</div>
+            <div class="kpi-val" id="kpi-status" style="color:var(--neon-green);">대기중</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">최근 PCI</div>
+            <div class="kpi-val" id="kpi-pci">-</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">이동거리</div>
+            <div class="kpi-val" id="kpi-dist">0.00 km</div>
+        </div>
+    </div>
+
+    <!-- 2-1. 다중 전화번호(뒷 4자리) 필터 바 -->
+    <div id="phone-filter-bar">
+        <span style="font-size:11px; color:#8ab8cc; font-weight:bold; flex-shrink:0;">📱 추적 대상:</span>
+        <div class="phone-chip selected" onclick="selectPhoneFilter('ALL')">
+            <span>전체 보기 (0)</span>
+        </div>
+    </div>
+
+    <!-- 3. 메인 지도 영역 -->
+    <div id="map-container">
+        <div id="map"></div>
+
+        <!-- 좌측 상단: 반경 & 이동동선 & 줌 축소 시 라벨 겹침 제어 스위치 -->
+        <div class="map-layer-controls">
+            <button class="layer-toggle-btn" id="btn-toggle-radius" onclick="toggleRadiusLayer()">🔵 기지국 반경: 켜짐</button>
+            <button class="layer-toggle-btn" id="btn-toggle-route" onclick="toggleRouteLayer()">⚡ 이동동선: 켜짐</button>
+            <button class="layer-toggle-btn" id="btn-toggle-labels" onclick="cycleLabelMode()">🏷️ 경유지 라벨: 자동(축소시 숨김)</button>
+        </div>
+
+        <!-- 우측 하단 줌/포커스 버튼 -->
+        <div class="map-fab-group">
+            <button class="fab-btn" onclick="zoomMap(-1)" title="확대">+</button>
+            <button class="fab-btn" onclick="zoomMap(1)" title="축소">−</button>
+            <button class="fab-btn" onclick="focusLastTarget()" title="최근 위치로 이동">🎯</button>
+        </div>
+
+        <!-- 지도 연결 안내 오버레이 -->
+        <div id="map-status-overlay">
+            <div class="status-box" id="status-box-content">
+                <div class="status-title">⚡ 카카오맵 엔진 로딩 중...</div>
+                <div class="status-text" id="status-message">
+                    잠시만 기다려 주세요. 지도가 열리지 않으면 코드 8번째 줄의 <code>KAKAO_JS_KEY</code> 값을 확인해 주세요.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달 1: 기지국 마커 클릭 시 열리는 '과거 체류 이력 상세 팝업' -->
+    <div id="history-modal" class="modal-overlay" onclick="if(event.target.id==='history-modal') closeHistoryModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <span class="modal-title" id="hist-title">📍 기지국 체류 이력 요약</span>
+                <button class="modal-close" onclick="closeHistoryModal()">닫기 ✕</button>
+            </div>
+            <div class="history-addr" id="hist-addr"></div>
+            <div class="history-summary" id="hist-summary"></div>
+            <div class="visit-list" id="hist-list"></div>
+        </div>
+    </div>
+
+    <!-- 모달 2: [업데이트 내역(패치노트)] 및 [버그/건의 제보] 통합 팝업 -->
+    <div id="info-modal" class="modal-overlay" onclick="if(event.target.id==='info-modal') closeInfoModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <span class="modal-title" id="info-modal-title">📋 시스템 정보 및 제보</span>
+                <button class="modal-close" onclick="closeInfoModal()">닫기 ✕</button>
+            </div>
+
+            <!-- 상단 탭 전환 버튼 (업데이트 내역 vs 버그제보/건의) -->
+            <div class="modal-tab-bar">
+                <button class="modal-tab-btn active" id="mtab-changelog" onclick="switchInfoModalTab('changelog')">📋 업데이트 내역</button>
+                <button class="modal-tab-btn" id="mtab-feedback" onclick="switchInfoModalTab('feedback')">💌 버그제보 / 건의</button>
+            </div>
+
+            <!-- 탭 1: 업데이트 내역 (패치노트) -->
+            <div id="mpane-changelog">
+                <div class="changelog-list" id="changelog-container"></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:10.5px; color:#8ab8cc;">버그·건의가 있으신가요? 👉</span>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-amber" onclick="switchInfoModalTab('feedback')">💌 제보하기</button>
+                        <button class="btn btn-green" onclick="closeInfoModal()">확인</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 탭 2: 버그 제보 및 기능 건의 (coool@police.go.kr) -->
+            <div id="mpane-feedback" style="display:none;">
+                <div class="feedback-info-box">
+                    • <b>현재 버전:</b> <b id="modal-ver-text" style="color:var(--neon-cyan);">v1.0.0</b> (제작: 인천계양경찰서 수사과 순경 황시원)<br>
+                    • 인식되지 않는 통신사 문자 양식(버그)이나 추가되었으면 하는 기능이 있다면 아래 이메일로 편하게 제보해 주세요!
+                </div>
+
+                <div class="email-copy-row">
+                    <div>
+                        <span style="font-size:10px; color:#8ab8cc; display:block;">제보 전용 이메일 (폴리스메일 / 외부메일 겸용)</span>
+                        <span class="email-text" id="report-email-display">coool@police.go.kr</span>
+                    </div>
+                    <button class="btn btn-amber" onclick="copyReportEmail()">📋 주소 복사</button>
+                </div>
+
+                <div style="font-size:11px; color:#8ab8cc; margin-bottom:4px;">빠른 메일 보내기 (스마트폰/PC 메일 앱 연동)</div>
+                <select id="fb-type" class="feedback-select">
+                    <option value="버그 및 오류 제보">🐞 버그 및 오류 제보</option>
+                    <option value="미인식 기지국 문자양식 제보">📩 인식 안 되는 문자 양식 제보</option>
+                    <option value="신규 기능 추가 건의">💡 신규 기능 추가 건의</option>
+                    <option value="기타 의견">💬 기타 의견</option>
+                </select>
+                <textarea id="fb-body" class="feedback-textarea" placeholder="증상이나 건의하실 내용을 적어주세요. (인식 안 되는 문자가 있다면 개인정보를 가리고 양식을 붙여넣어 주시면 빠르게 반영됩니다)"></textarea>
+
+                <div style="display:flex; justify-content:flex-end; gap:6px;">
+                    <button class="btn" onclick="closeInfoModal()">닫기</button>
+                    <button class="btn btn-green" onclick="sendFeedbackMail()">📧 메일 앱으로 보내기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. 하단 컨트롤 및 수신 내역 시트 (찌그러지던 하단 푸터 제거 완료) -->
+    <div id="bottom-panel">
+        <div class="sheet-header">
+            <div class="mobile-tabs">
+                <button class="tab-btn active" id="tab-targets" onclick="switchMobileTab('targets')">🎯 기지국 수신 내역</button>
+                <button class="tab-btn" id="tab-console" onclick="switchMobileTab('console')">💻 시스템 기록</button>
+            </div>
+            <button class="btn" id="toggle-sheet-btn" onclick="toggleBottomSheet()" style="margin-left:auto; padding:4px 10px;">▼ 패널 접기</button>
+        </div>
+
+        <div class="toolbar">
+            <div class="input-group">
+                <input type="text" id="sms-input" class="sms-input" placeholder="기지국 문자 붙여넣기 (번호 뒷4자리·전체번호·날짜·PCI·전원꺼짐 자동 구분)..." onkeydown="if(event.key==='Enter') handleManualSms()" />
+                <button class="btn" onclick="handleManualSms()">⚡ 위치 추적</button>
+            </div>
+        </div>
+
+        <div class="log-grid">
+            <div id="target-list">
+                <div style="color:#689fb8; text-align:center; padding-top:18px;">
+                    [대기중] 기지국 문자가 수신되면 전화번호(뒷 4자리)별 고유 색상으로 동선이 표시됩니다.
+                </div>
+            </div>
+            <div id="sys-console"></div>
+        </div>
+    </div>
+
+    <script>
+        let kakaoMap = null;
+        let kakaoGeocoder = null;
+        let kakaoPlaces = null;
+
+        const TARGET_PALETTE = [
+            '#0055ff', // 1번: 선명한 블루
+            '#8b00ff', // 2번: 딥 바이올렛(보라)
+            '#00897b', // 3번: 다크 틸(청록)
+            '#ff6d00', // 4번: 비비드 오렌지
+            '#3949ab', // 5번: 인디고(남색)
+            '#c2185b', // 6번: 자주색
+            '#2e7d32'  // 7번: 포레스트 그린
+        ];
+
+        let phoneGroups = {};
+        let phoneOrder = [];
+        let selectedPhoneFilter = 'ALL';
+        let allStationsMap = {};
+        let stationUidCounter = 0;
+        let logSeqCounter = 0;
+        let lastActiveGroup = null;
+
+        let soundEnabled = true;
+        let showRadius = true;
+        let showRoute = true;
+        let labelMode = 'AUTO';
+
+        function sysLog(msg, color = '#00e676') {
+            const box = document.getElementById('sys-console');
+            if (!box) return;
+            const now = new Date();
+            const dtStr = formatDateTimeShort(now);
+            const line = document.createElement('div');
+            line.style.color = color;
+            line.innerHTML = `[${dtStr}] &gt; ${msg}`;
+            box.prepend(line);
+        }
+
+        window.addEventListener('DOMContentLoaded', function() {
+            // 버전 텍스트 및 패치노트 목록 렌더링
+            document.getElementById('header-ver-badge').innerText = APP_VERSION;
+            document.getElementById('modal-ver-text').innerText = APP_VERSION;
+            document.getElementById('report-email-display').innerText = REPORT_EMAIL;
+            renderChangelogList();
+
+            sysLog(`기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
+
+            // ★ 신규 버전으로 업데이트되었을 때 최초 1회 자동으로 패치노트 창 띄우기 ★
+            try {
+                const lastSeenVer = localStorage.getItem('CELL_TRACKER_SEEN_VERSION');
+                if (lastSeenVer && lastSeenVer !== APP_VERSION) {
+                    openInfoModal('changelog');
+                    sysLog(`[업데이트 안내] ${APP_VERSION} 버전의 새로운 변경사항을 확인하세요.`, "#ffab00");
+                }
+                localStorage.setItem('CELL_TRACKER_SEEN_VERSION', APP_VERSION);
+            } catch (e) {}
+
+            setInterval(refreshActiveOfflineTimers, 10000);
+
+            if (window.location.protocol === 'file:') {
+                document.getElementById('status-box-content').innerHTML = `
+                    <div class="status-title" style="color:#ff1744;">⚠️ 파일을 더블클릭(file://)해서 여셨습니다!</div>
+                    <div class="status-text">
+                        카카오맵은 보안 정책상 <code>http://localhost</code> 환경(안드로이드 앱 내부 또는 로컬 웹 서버)에서만 열립니다.
+                    </div>
+                `;
+                return;
+            }
+
+            if (!KAKAO_JS_KEY || KAKAO_JS_KEY.includes("여기에") || KAKAO_JS_KEY.length < 15) {
+                document.getElementById('status-box-content').innerHTML = `
+                    <div class="status-title" style="color:#ffab00;">🔑 카카오 API 키를 입력해 주세요</div>
+                    <div class="status-text">
+                        메모장으로 <code>index.html</code>을 열고 <b>맨 위 8번째 줄</b>의 <code>KAKAO_JS_KEY</code> 따옴표 안에 본인의 카카오 JavaScript 키를 넣은 뒤 저장해 주세요.
+                    </div>
+                `;
+                return;
+            }
+
+            loadKakaoMapSdk(KAKAO_JS_KEY.trim());
+        });
+
+        // ===== 업데이트 내역(패치노트) 및 버그 제보 통합 모달 제어 =====
+        function renderChangelogList() {
+            const container = document.getElementById('changelog-container');
+            if (!container || typeof UPDATE_HISTORY === 'undefined') return;
+
+            container.innerHTML = UPDATE_HISTORY.map((item, idx) => {
+                const isFirst = (idx === 0);
+                const newBadge = isFirst ? `<span class="cl-badge-new">최신</span>` : '';
+                const liHtml = item.changes.map(c => `<li>${c}</li>`).join('');
+                return `
+                    <div class="changelog-card ${isFirst ? 'latest' : ''}">
+                        <div class="cl-head">
+                            <div><span class="cl-ver">${item.version}</span>${newBadge}</div>
+                            <span class="cl-date">${item.date}</span>
+                        </div>
+                        <ul class="cl-items">${liHtml}</ul>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.openInfoModal = function(defaultTab = 'changelog') {
+            switchInfoModalTab(defaultTab);
+            document.getElementById('info-modal').style.display = 'flex';
+        };
+        window.closeInfoModal = function() {
+            document.getElementById('info-modal').style.display = 'none';
+        };
+        window.switchInfoModalTab = function(tabName) {
+            const paneCl = document.getElementById('mpane-changelog');
+            const paneFb = document.getElementById('mpane-feedback');
+            const btnCl  = document.getElementById('mtab-changelog');
+            const btnFb  = document.getElementById('mtab-feedback');
+
+            if (tabName === 'changelog') {
+                paneCl.style.display = 'block';
+                paneFb.style.display = 'none';
+                btnCl.classList.add('active');
+                btnFb.classList.remove('active');
+            } else {
+                paneCl.style.display = 'none';
+                paneFb.style.display = 'block';
+                btnCl.classList.remove('active');
+                btnFb.classList.add('active');
+            }
+        };
+
+        window.copyReportEmail = function() {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(REPORT_EMAIL).then(() => {
+                    alert(`제보 이메일 주소(${REPORT_EMAIL})가 복사되었습니다!`);
+                }).catch(() => fallbackCopyEmail());
+            } else {
+                fallbackCopyEmail();
+            }
+        };
+        function fallbackCopyEmail() {
+            const temp = document.createElement('textarea');
+            temp.value = REPORT_EMAIL;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+            alert(`제보 이메일 주소(${REPORT_EMAIL})가 복사되었습니다!`);
+        }
+        window.sendFeedbackMail = function() {
+            const type = document.getElementById('fb-type').value;
+            const bodyText = document.getElementById('fb-body').value.trim();
+            const subject = `[기지국위치추적 ${APP_VERSION}] ${type}`;
+            const content = `■ 프로그램 버전: ${APP_VERSION}\n■ 제보 유형: ${type}\n\n■ 상세 내용:\n${bodyText || '(내용을 입력해 주세요)'}\n`;
+            window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(content)}`;
+        };
+
+        function loadKakaoMapSdk(appKey) {
+            const script = document.createElement('script');
+            script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
+            
+            script.onload = function() {
+                kakao.maps.load(function() {
+                    document.getElementById('map-status-overlay').style.display = 'none';
+                    const container = document.getElementById('map');
+                    kakaoMap = new kakao.maps.Map(container, {
+                        center: new kakao.maps.LatLng(37.6185, 126.7165),
+                        level: 4
+                    });
+                    kakaoGeocoder = new kakao.maps.services.Geocoder();
+                    kakaoPlaces = new kakao.maps.services.Places();
+
+                    kakao.maps.event.addListener(kakaoMap, 'zoom_changed', function() {
+                        applyLabelVisibilityRule();
+                    });
+
+                    sysLog(`카카오맵 연결 완료 (${APP_VERSION}). 전화번호(뒷 4자리/전체) 자동 인식 대기중.`, "#00e676");
+                });
+            };
+
+            script.onerror = function() {
+                document.getElementById('status-box-content').innerHTML = `
+                    <div class="status-title" style="color:#ff1744;">❌ 카카오 서버가 지도 로드를 거부했습니다</div>
+                    <div class="status-text">
+                        1. 카카오 디벨로퍼스 [플랫폼 - Web]에 현재 주소(<b>${window.location.origin}</b>)가 등록되어 있는지 확인하세요.<br>
+                        2. [제품 설정 - 카카오맵]의 <b>사용 설정이 ON</b>인지 확인하세요.<br>
+                        3. 코드 8번째 줄에 넣은 키가 <b>JavaScript 키</b>가 맞는지 확인하세요.
+                    </div>
+                `;
+            };
+
+            document.head.appendChild(script);
+        }
+
+        function applyLabelVisibilityRule() {
+            if (!kakaoMap) return;
+            const mapContainer = document.getElementById('map-container');
+            const level = kakaoMap.getLevel();
+
+            if (labelMode === 'ALWAYS') {
+                mapContainer.classList.remove('compact-past-labels');
+            } else if (labelMode === 'HIDE_PAST') {
+                mapContainer.classList.add('compact-past-labels');
+            } else {
+                if (level >= 6) {
+                    mapContainer.classList.add('compact-past-labels');
+                } else {
+                    mapContainer.classList.remove('compact-past-labels');
+                }
+            }
+        }
+
+        function cycleLabelMode() {
+            const btn = document.getElementById('btn-toggle-labels');
+            if (labelMode === 'AUTO') {
+                labelMode = 'ALWAYS';
+                btn.innerText = "🏷️ 경유지 라벨: 항상 켜짐";
+                btn.classList.remove('off');
+            } else if (labelMode === 'ALWAYS') {
+                labelMode = 'HIDE_PAST';
+                btn.innerText = "🏷️ 경유지 라벨: 숨김(번호만)";
+                btn.classList.add('off');
+            } else {
+                labelMode = 'AUTO';
+                btn.innerText = "🏷️ 경유지 라벨: 자동(축소시 숨김)";
+                btn.classList.remove('off');
+            }
+            applyLabelVisibilityRule();
+        }
+
+        function formatDateTimeShort(dateObj) {
+            if (!dateObj || isNaN(dateObj.getTime())) return "-";
+            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const dd = String(dateObj.getDate()).padStart(2, '0');
+            const hh = String(dateObj.getHours()).padStart(2, '0');
+            const min = String(dateObj.getMinutes()).padStart(2, '0');
+            return `${mm}.${dd} ${hh}:${min}`;
+        }
+
+        function parseDateTimeInfo(rawDateStr, rawTimeStr) {
+            const now = new Date();
+            let yr = now.getFullYear();
+            let mo = now.getMonth();
+            let da = now.getDate();
+            let hh = now.getHours();
+            let mi = now.getMinutes();
+            let se = 0;
+
+            if (rawTimeStr) {
+                const tParts = rawTimeStr.split(':');
+                hh = parseInt(tParts[0], 10);
+                mi = parseInt(tParts[1], 10);
+                if (tParts[2]) se = parseInt(tParts[2], 10);
+            }
+
+            if (rawDateStr) {
+                const dParts = rawDateStr.split(/[-./]/).filter(Boolean);
+                if (dParts.length === 3) {
+                    yr = parseInt(dParts[0], 10);
+                    if (yr < 100) yr += 2000;
+                    mo = parseInt(dParts[1], 10) - 1;
+                    da = parseInt(dParts[2], 10);
+                } else if (dParts.length === 2) {
+                    mo = parseInt(dParts[0], 10) - 1;
+                    da = parseInt(dParts[1], 10);
+                }
+            }
+
+            const resultDate = new Date(yr, mo, da, hh, mi, se);
+            if (!rawDateStr && (resultDate.getTime() - now.getTime() > 60000)) {
+                resultDate.setDate(resultDate.getDate() - 1);
+            }
+
+            return {
+                dateObj: resultDate,
+                displayStr: formatDateTimeShort(resultDate)
+            };
+        }
+
+        function formatDurationMin(startDate, endDate) {
+            if (!startDate || !endDate) return "0분";
+            const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+            const totalMin = Math.floor(diffMs / 60000);
+            if (totalMin < 1) {
+                const sec = Math.floor(diffMs / 1000);
+                return sec > 0 ? `${sec}초` : "1분 미만";
+            }
+            if (totalMin < 60) return `${totalMin}분`;
+            const hrs = Math.floor(totalMin / 60);
+            const mins = totalMin % 60;
+            return mins > 0 ? `${hrs}시간 ${mins}분` : `${hrs}시간`;
+        }
+
+        function refreshActiveOfflineTimers() {
+            const now = new Date();
+            phoneOrder.forEach(phone => {
+                const group = phoneGroups[phone];
+                if (!group || !group.currentStation) return;
+                const st = group.currentStation;
+                const lastVisit = st.visits[st.visits.length - 1];
+
+                if (lastVisit && lastVisit.isOffline && !lastVisit.offlineEndedDate) {
+                    const elapsedStr = formatDurationMin(lastVisit.startDate, now);
+                    st.overlay.setContent(buildStationMarkerHtml(st, true));
+
+                    const badgeEl = document.getElementById(`log-status-${lastVisit.logCardId}`);
+                    if (badgeEl) {
+                        badgeEl.innerText = `⚫ 전원 꺼짐 (${elapsedStr}째 꺼져 있음)`;
+                    }
+                }
+            });
+            refreshTopDashboard();
+        }
+
+        function toggleRadiusLayer() {
+            showRadius = !showRadius;
+            const btn = document.getElementById('btn-toggle-radius');
+            if (showRadius) {
+                btn.innerText = "🔵 기지국 반경: 켜짐";
+                btn.classList.remove('off');
+            } else {
+                btn.innerText = "⚪ 기지국 반경: 꺼짐";
+                btn.classList.add('off');
+            }
+            syncMapLayersVisibility();
+        }
+
+        function toggleRouteLayer() {
+            showRoute = !showRoute;
+            const btn = document.getElementById('btn-toggle-route');
+            if (showRoute) {
+                btn.innerText = "⚡ 이동동선: 켜짐";
+                btn.classList.remove('off');
+            } else {
+                btn.innerText = "⚪ 이동동선: 꺼짐";
+                btn.classList.add('off');
+            }
+            syncMapLayersVisibility();
+        }
+
+        function syncMapLayersVisibility() {
+            phoneOrder.forEach(phone => {
+                const group = phoneGroups[phone];
+                if (!group) return;
+                const isGroupVis = group.visible;
+
+                if (group.polyline) {
+                    group.polyline.setMap((isGroupVis && showRoute) ? kakaoMap : null);
+                }
+                group.stations.forEach(st => {
+                    if (st.overlay) st.overlay.setMap(isGroupVis ? kakaoMap : null);
+                    if (st.circle) st.circle.setMap((isGroupVis && showRadius) ? kakaoMap : null);
+                });
+            });
+        }
+
+        window.receiveSmsFromAndroid = function(rawText) {
+            if (!rawText || !rawText.trim()) return;
+            if (!kakaoMap) {
+                alert("지도가 아직 로드되지 않았습니다.");
+                return;
+            }
+            sysLog(`문자 수신: "${rawText}"`, "#00e5ff");
+            const parsed = parseSmsContent(rawText);
+            if (!parsed.address) {
+                sysLog("오류: 문자에서 유효한 주소를 추출하지 못했습니다.", "#ff1744");
+                return;
+            }
+            geocodeOnKakao(parsed);
+        };
+
+        // 전화번호 뒷 4자리 / 마스킹 번호 / 전체 번호 추출 및 PCI·주소·연도 충돌 방지 파서
+        function parseSmsContent(text) {
+            let working = text;
+            let phone = null;
+
+            const fullOrMaskedPhoneRegex = /(?:01[016789][-.\s]?(?:\d{3,4}|\*{3,4})[-.\s]?(\d{4}))|(?:\*{2,4}[-.\s]?(\d{4}))/;
+            const fmMatch = working.match(fullOrMaskedPhoneRegex);
+            if (fmMatch) {
+                const last4 = fmMatch[1] || fmMatch[2];
+                phone = `#${last4}`;
+                working = working.replace(fmMatch[0], ' ');
+            }
+
+            const offlineRegex = /\(\s*전원\s*꺼짐\s*\)|\[\s*전원\s*꺼짐\s*\]|전원\s*꺼짐|전원꺼짐|오프라인|착신\s*불가|전원\s*종료/i;
+            const isOffline = offlineRegex.test(working);
+            working = working.replace(offlineRegex, ' ');
+
+            let rawDate = null;
+            let rawTime = null;
+            const fullDateTimeRegex = /(\d{2,4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/;
+            const fullMatch = working.match(fullDateTimeRegex);
+            if (fullMatch) {
+                rawDate = fullMatch[1];
+                rawTime = fullMatch[2];
+                working = working.replace(fullMatch[0], ' ');
+            } else {
+                const timeOnlyRegex = /(\d{1,2}:\d{2}(?::\d{2})?)/;
+                const timeMatch = working.match(timeOnlyRegex);
+                if (timeMatch) {
+                    rawTime = timeMatch[1];
+                    working = working.replace(timeMatch[0], ' ');
+                }
+            }
+            const dtInfo = parseDateTimeInfo(rawDate, rawTime);
+
+            let pci = null;
+            const explicitPci = working.match(/PCI\s*[:=\-]?\s*(\d{1,4})/i);
+            if (explicitPci) {
+                pci = explicitPci[1];
+                working = working.replace(explicitPci[0], ' ');
+            }
+
+            if (!phone) {
+                const labeledPhone = working.match(/(?:번호|대상|단말기|뒷자리|휴대폰|고객|#)\s*[:=\-]?\s*(\d{4})(?!\d)/);
+                if (labeledPhone) {
+                    phone = `#${labeledPhone[1]}`;
+                    working = working.replace(labeledPhone[0], ' ');
+                }
+            }
+
+            let extractedAddr = null;
+            const korAddrRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|[가-힣]+(?:시|도|군|구))\s+[가-힣0-9\s\-]+(?:번길|로|길|동|읍|면|리|가)\s*[0-9\-산번지]*)/;
+            const addrMatch = working.match(korAddrRegex);
+            if (addrMatch) {
+                extractedAddr = addrMatch[1].trim();
+                working = working.replace(addrMatch[0], ' ');
+            }
+
+            const bracketRegex = /\[\s*(\d{1,4})\s*\]|\(\s*(\d{1,4})\s*\)/g;
+            let bMatch;
+            const bracketTokens = [];
+            while ((bMatch = bracketRegex.exec(working)) !== null) {
+                bracketTokens.push({ full: bMatch[0], digits: bMatch[1] || bMatch[2] });
+            }
+            bracketTokens.forEach(t => { working = working.replace(t.full, ' '); });
+
+            if (bracketTokens.length >= 2) {
+                const fourDigitIdx = bracketTokens.findIndex(t => t.digits.length === 4);
+                if (!phone && fourDigitIdx !== -1) {
+                    phone = `#${bracketTokens[fourDigitIdx].digits}`;
+                    bracketTokens.splice(fourDigitIdx, 1);
+                }
+                if (!pci && bracketTokens.length > 0) {
+                    pci = bracketTokens[0].digits;
+                }
+            } else if (bracketTokens.length === 1) {
+                const d = bracketTokens[0].digits;
+                const numVal = parseInt(d, 10);
+                if (pci && !phone && d.length === 4) {
+                    phone = `#${d}`;
+                } else if (phone && !pci) {
+                    pci = d;
+                } else if (!phone && !pci) {
+                    if (d.length === 4 && (numVal > 1007 || d.startsWith('0'))) {
+                        phone = `#${d}`;
+                    } else {
+                        pci = d;
+                    }
+                }
+            }
+
+            if (!phone) {
+                const standalone4 = working.match(/(?:^|\s|\/|,|:)(\d{4})(?=\s|$|\/|,|\)|\]|-)/);
+                if (standalone4) {
+                    phone = `#${standalone4[1]}`;
+                    working = working.replace(standalone4[1], ' ');
+                }
+            }
+
+            if (!pci) {
+                const standalonePci = working.match(/(?:^|\s|\/|,|:)(\d{1,3})(?=\s|$|\/|,|\)|\])/);
+                if (standalonePci) {
+                    pci = standalonePci[1];
+                }
+            }
+
+            if (!extractedAddr) {
+                extractedAddr = working
+                    .replace(/\[.*?\]/g, ' ')
+                    .replace(/\(.*?\)/g, ' ')
+                    .replace(/(조회시간|기지국주소|기지국위치|위치정보|대상번호|전화번호|휴대폰|주소|시간|발신|회신|PCI)\s*[:=\-]?/gi, ' ')
+                    .replace(/\s+(인근|일대|주변|부근|앞|뒤|내|기지국|옥상|철탑).*$/g, '')
+                    .replace(/[\/|,]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            } else {
+                extractedAddr = extractedAddr.replace(/\s+(인근|일대|주변|부근|앞|뒤|내|기지국|옥상|철탑).*$/g, '').trim();
+            }
+
+            return {
+                phone: phone || "번호미상",
+                address: extractedAddr,
+                pci: pci || "미상",
+                dateObj: dtInfo.dateObj,
+                timeStr: dtInfo.displayStr,
+                isOffline: isOffline
+            };
+        }
+
+        function geocodeOnKakao(parsed) {
+            const { address } = parsed;
+            kakaoGeocoder.addressSearch(address, function(result, status) {
+                if (status === kakao.maps.services.Status.OK && result.length > 0) {
+                    processLocationSignal(parseFloat(result[0].y), parseFloat(result[0].x), parsed);
+                    return;
+                }
+
+                kakaoPlaces.keywordSearch(address, function(kwRes, kwStatus) {
+                    if (kwStatus === kakao.maps.services.Status.OK && kwRes.length > 0) {
+                        processLocationSignal(parseFloat(kwRes[0].y), parseFloat(kwRes[0].x), parsed);
+                        return;
+                    }
+
+                    const roadOnly = address.replace(/\s+(산\s*)?\d+(-\d+)?(\s*번지)?$/, '').trim();
+                    if (roadOnly && roadOnly !== address) {
+                        sysLog(`[${address}] 정식 건물번호 없음 -> [${roadOnly}] 도로 구간으로 보정 추적합니다.`, "#ffab00");
+                        kakaoGeocoder.addressSearch(roadOnly, function(rRes, rStatus) {
+                            if (rStatus === kakao.maps.services.Status.OK && rRes.length > 0) {
+                                parsed.address = `${address} (도로보정)`;
+                                processLocationSignal(parseFloat(rRes[0].y), parseFloat(rRes[0].x), parsed);
+                            } else {
+                                kakaoPlaces.keywordSearch(roadOnly, function(rkRes, rkStatus) {
+                                    if (rkStatus === kakao.maps.services.Status.OK && rkRes.length > 0) {
+                                        parsed.address = `${address} (인근보정)`;
+                                        processLocationSignal(parseFloat(rkRes[0].y), parseFloat(rkRes[0].x), parsed);
+                                    } else {
+                                        sysLog(`주소 변환 실패: [${address}]`, "#ff1744");
+                                    }
+                                });
+                            }
+                        });
+                    } else {
+                        sysLog(`주소 변환 실패: [${address}]`, "#ff1744");
+                    }
+                });
+            });
+        }
+
+        function getOrCreatePhoneGroup(phone) {
+            if (!phoneGroups[phone]) {
+                const colorIdx = phoneOrder.length % TARGET_PALETTE.length;
+                const assignedColor = TARGET_PALETTE[colorIdx];
+                const poly = new kakao.maps.Polyline({
+                    map: showRoute ? kakaoMap : null,
+                    path: [],
+                    strokeWeight: 4,
+                    strokeColor: assignedColor,
+                    strokeOpacity: 0.88,
+                    strokeStyle: 'shortdash'
+                });
+
+                phoneGroups[phone] = {
+                    phone: phone,
+                    color: assignedColor,
+                    visible: true,
+                    stations: [],
+                    routeCoords: [],
+                    polyline: poly,
+                    currentStation: null
+                };
+                phoneOrder.push(phone);
+            }
+            return phoneGroups[phone];
+        }
+
+        function processLocationSignal(lat, lng, parsed) {
+            const { phone, address, pci, dateObj: eventDate, timeStr, isOffline } = parsed;
+            const group = getOrCreatePhoneGroup(phone);
+            lastActiveGroup = group;
+
+            const pos = new kakao.maps.LatLng(lat, lng);
+            if (group.visible) kakaoMap.panTo(pos);
+
+            if (group.currentStation) {
+                const prevStation = group.currentStation;
+                const prevVisit = prevStation.visits[prevStation.visits.length - 1];
+                const isSamePci = (pci !== "미상" && prevStation.pci === pci) || (pci === "미상" && prevStation.address === address);
+
+                if (prevVisit && prevVisit.isOffline && (!isSamePci || !isOffline)) {
+                    prevVisit.offlineEndedDate = eventDate;
+                    prevVisit.endTimeStr = timeStr;
+                    const offDurationStr = formatDurationMin(prevVisit.startDate, eventDate);
+
+                    const badgeEl = document.getElementById(`log-status-${prevVisit.logCardId}`);
+                    if (badgeEl) {
+                        badgeEl.innerText = `⚫ 전원 재부팅됨 (총 ${offDurationStr}간 꺼져 있었음: ${prevVisit.startTimeStr} ~ ${timeStr})`;
+                    }
+                    sysLog(`[전원 재부팅 / 위치변경] ${phone} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
+                }
+
+                if (isSamePci && prevVisit.isOffline === isOffline) {
+                    prevVisit.count++;
+                    if (!isOffline) {
+                        prevVisit.endDate = eventDate;
+                        prevVisit.endTimeStr = timeStr;
+                    }
+                    prevStation.overlay.setContent(buildStationMarkerHtml(prevStation, true));
+                    updateExistingLogCard(prevStation, prevVisit);
+                    renderPhoneFilterBar();
+                    refreshTopDashboard();
+                    playTacticalBeep(isOffline);
+                    return;
+                }
+            }
+
+            group.stations.forEach(st => {
+                st.overlay.setContent(buildStationMarkerHtml(st, false));
+                st.circle.setOptions({
+                    strokeWeight: 1.5,
+                    strokeColor: group.color,
+                    strokeOpacity: 0.35,
+                    fillColor: group.color,
+                    fillOpacity: 0.03
+                });
+            });
+
+            let station = group.stations.find(st => (pci !== "미상" && st.pci === pci && Math.abs(st.lat - lat) < 0.005) || (st.address === address));
+
+            logSeqCounter++;
+            const newVisit = {
+                visitNum: station ? station.visits.length + 1 : 1,
+                startTimeStr: timeStr,
+                startDate: eventDate,
+                endTimeStr: timeStr,
+                endDate: eventDate,
+                count: 1,
+                isOffline: isOffline,
+                offlineEndedDate: null,
+                logCardId: logSeqCounter
+            };
+
+            if (station) {
+                station.visits.push(newVisit);
+                station.circle.setOptions({
+                    strokeWeight: 2,
+                    strokeColor: isOffline ? '#ff1744' : group.color,
+                    strokeOpacity: 0.85,
+                    fillColor: isOffline ? '#ff1744' : group.color,
+                    fillOpacity: 0.1
+                });
+                station.overlay.setContent(buildStationMarkerHtml(station, true));
+                group.currentStation = station;
+                sysLog(`[재방문 감지] ${phone} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
+            } else {
+                stationUidCounter++;
+                const seq = group.stations.length + 1;
+                const circle = new kakao.maps.Circle({
+                    map: (group.visible && showRadius) ? kakaoMap : null,
+                    center: pos,
+                    radius: 400,
+                    strokeWeight: 2,
+                    strokeColor: isOffline ? '#ff1744' : group.color,
+                    strokeOpacity: 0.85,
+                    strokeStyle: 'shortdash',
+                    fillColor: isOffline ? '#ff1744' : group.color,
+                    fillOpacity: 0.1
+                });
+
+                station = {
+                    stationUid: stationUidCounter,
+                    seq: seq,
+                    phone: phone,
+                    color: group.color,
+                    lat: lat,
+                    lng: lng,
+                    address: address,
+                    pci: pci,
+                    visits: [newVisit],
+                    circle: circle,
+                    overlay: null
+                };
+
+                const overlay = new kakao.maps.CustomOverlay({
+                    map: group.visible ? kakaoMap : null,
+                    position: pos,
+                    content: buildStationMarkerHtml(station, true),
+                    xAnchor: 0.5,
+                    yAnchor: 0.5,
+                    clickable: true
+                });
+                station.overlay = overlay;
+                group.stations.push(station);
+                group.currentStation = station;
+                allStationsMap[station.stationUid] = station;
+            }
+
+            group.routeCoords.push({ lat, lng });
+            group.polyline.setPath(group.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
+            group.polyline.setMap((group.visible && showRoute) ? kakaoMap : null);
+
+            createNewLogCard(station, newVisit);
+            renderPhoneFilterBar();
+            refreshTopDashboard();
+            applyLabelVisibilityRule();
+            playTacticalBeep(isOffline);
+        }
+
+        function getShortPhoneLabel(phone) {
+            if (phone === "번호미상") return "";
+            return `<span class="phone-mini">📱${phone}</span>`;
+        }
+
+        function buildStationMarkerHtml(st, isCurrentActive) {
+            const lastVisit = st.visits[st.visits.length - 1];
+            const totalVisits = st.visits.length;
+            const revisitTag = totalVisits > 1 ? `<span class="revisit-badge">${totalVisits}회 방문</span>` : '';
+            const phoneBadge = getShortPhoneLabel(st.phone);
+
+            if (isCurrentActive) {
+                if (lastVisit.isOffline) {
+                    const elapsedStr = formatDurationMin(lastVisit.startDate, new Date());
+                    return `
+                        <div class="tactical-node offline" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
+                            <div class="node-core"></div>
+                            <div class="node-label">
+                                ${phoneBadge}⚫ #${st.seq} [PCI:${st.pci}] ${revisitTag}
+                                <span class="sub-time">🕒${lastVisit.startTimeStr} | ⚠️전원꺼짐(${elapsedStr})</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
+                    const stayText = lastVisit.count > 1 
+                        ? `🕒 ${lastVisit.startTimeStr} ~ ${lastVisit.endTimeStr} <span class="stay-badge">${stayMin} 체류중</span>`
+                        : `🕒 확인: ${lastVisit.endTimeStr}`;
+
+                    return `
+                        <div class="tactical-node" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
+                            <div class="ripple-ring"></div>
+                            <div class="ripple-ring delay-1"></div>
+                            <div class="ripple-ring delay-2"></div>
+                            <div class="node-core"></div>
+                            <div class="node-label">
+                                ${phoneBadge}#${st.seq} 활성 [PCI:${st.pci}] ${revisitTag}
+                                <span class="sub-time">${stayText}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
+            const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
+            return `
+                <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
+                    <div class="node-core"></div>
+                    <div class="node-mini-badge">${st.phone !== '번호미상' ? st.phone : ''} #${st.seq}</div>
+                    <div class="node-label">
+                        ${phoneBadge}#${st.seq} [PCI:${st.pci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPhoneFilterBar() {
+            const bar = document.getElementById('phone-filter-bar');
+            const totalStations = Object.keys(allStationsMap).length;
+
+            let html = `<span style="font-size:11px; color:#8ab8cc; font-weight:bold; flex-shrink:0;">📱 추적 대상:</span>`;
+            html += `
+                <div class="phone-chip ${selectedPhoneFilter === 'ALL' ? 'selected' : ''}" onclick="selectPhoneFilter('ALL')">
+                    <span>전체 보기 (${totalStations})</span>
+                </div>
+            `;
+
+            phoneOrder.forEach(phone => {
+                const g = phoneGroups[phone];
+                const isSel = (selectedPhoneFilter === phone) ? 'selected' : '';
+                const isHidden = !g.visible ? 'hidden-on-map' : '';
+                const eyeIcon = g.visible ? '👁️켜짐' : '🚫꺼짐';
+                const displayPhone = phone.startsWith('#') ? `뒷자리 ${phone.substring(1)}` : phone;
+
+                html += `
+                    <div class="phone-chip ${isSel} ${isHidden}" style="border-color:${g.color};" onclick="selectPhoneFilter('${phone}')">
+                        <span class="phone-color-dot" style="background:${g.color};"></span>
+                        <span>${displayPhone} (${g.stations.length})</span>
+                        <button class="phone-vis-btn" onclick="event.stopPropagation(); togglePhoneVisibility('${phone}');" title="지도에서 이 번호만 켜기/끄기">${eyeIcon}</button>
+                    </div>
+                `;
+            });
+
+            bar.innerHTML = html;
+        }
+
+        window.selectPhoneFilter = function(phoneKey) {
+            selectedPhoneFilter = phoneKey;
+            renderPhoneFilterBar();
+            refreshTopDashboard();
+            filterLogCardsByPhone();
+
+            if (phoneKey !== 'ALL' && phoneGroups[phoneKey] && phoneGroups[phoneKey].currentStation) {
+                const st = phoneGroups[phoneKey].currentStation;
+                kakaoMap.panTo(new kakao.maps.LatLng(st.lat, st.lng));
+            }
+        };
+
+        window.togglePhoneVisibility = function(phoneKey) {
+            const g = phoneGroups[phoneKey];
+            if (!g) return;
+            g.visible = !g.visible;
+            syncMapLayersVisibility();
+            renderPhoneFilterBar();
+            sysLog(`[표시 제어] ${phoneKey} 동선 및 마커 ${g.visible ? '표시(ON)' : '숨김(OFF)'}`, "#00e5ff");
+        };
+
+        function filterLogCardsByPhone() {
+            const cards = document.querySelectorAll('#target-list .target-card');
+            cards.forEach(card => {
+                const cardPhone = card.getAttribute('data-phone');
+                if (selectedPhoneFilter === 'ALL' || cardPhone === selectedPhoneFilter) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        window.openHistoryModal = function(stationUid) {
+            const st = allStationsMap[stationUid];
+            if (!st) return;
+
+            const displayPhone = st.phone.startsWith('#') ? `번호 뒷자리 ${st.phone.substring(1)}` : st.phone;
+            document.getElementById('hist-title').innerText = `📍 [${displayPhone}] 기지국 #${st.seq} (PCI: ${st.pci}) 이력`;
+            document.getElementById('hist-addr').innerText = st.address;
+
+            let totalMs = 0;
+            st.visits.forEach(v => {
+                if (!v.isOffline) {
+                    totalMs += Math.max(0, v.endDate.getTime() - v.startDate.getTime());
+                }
+            });
+            const totalMin = Math.floor(totalMs / 60000);
+            const totalStayStr = totalMin > 0 ? `${totalMin}분` : (st.visits.some(v => !v.isOffline && v.count > 1) ? "1분 미만" : "단발 통과");
+
+            document.getElementById('hist-summary').innerText = `총 방문 횟수: ${st.visits.length}회 | 누적 체류 시간: ${totalStayStr}`;
+
+            const listBox = document.getElementById('hist-list');
+            listBox.innerHTML = '';
+
+            st.visits.forEach((v, idx) => {
+                const div = document.createElement('div');
+                div.className = v.isOffline ? 'visit-item off-visit' : 'visit-item';
+
+                if (v.isOffline) {
+                    const endRef = v.offlineEndedDate || new Date();
+                    const offDur = formatDurationMin(v.startDate, endRef);
+                    const statusTxt = v.offlineEndedDate 
+                        ? `전원 재부팅됨 (${v.startTimeStr} ~ ${v.endTimeStr} / 총 ${offDur}간 꺼져 있었음)`
+                        : `현재 전원 꺼짐 상태 (최초 ${v.startTimeStr} ~ 현재 ${offDur} 경과)`;
+                    div.innerHTML = `
+                        <div><b>[${idx + 1}차 기록] ⚫ 단말기 전원 꺼짐</b></div>
+                        <div style="color:#ffab00;">• ${statusTxt}</div>
+                        <div style="color:#9ad8ed; font-size:10.5px;">• 동일 위치 수신 횟수: ${v.count}회</div>
+                    `;
+                } else {
+                    const stayDur = formatDurationMin(v.startDate, v.endDate);
+                    const timeRange = v.count > 1 ? `${v.startTimeStr} ~ ${v.endTimeStr} (<b>${stayDur} 동안 머묾</b>)` : `${v.startTimeStr} (1회 수신)`;
+                    div.innerHTML = `
+                        <div><b>[${idx + 1}차 방문] 🟢 신호 활성 체류</b></div>
+                        <div style="color:#00e676;">• 체류 일시: ${timeRange}</div>
+                        <div style="color:#9ad8ed; font-size:10.5px;">• 연속 수신 횟수: ${v.count}회</div>
+                    `;
+                }
+                listBox.appendChild(div);
+            });
+
+            document.getElementById('history-modal').style.display = 'flex';
+        };
+
+        window.closeHistoryModal = function() {
+            document.getElementById('history-modal').style.display = 'none';
+        };
+
+        function refreshTopDashboard() {
+            const targetGroup = (selectedPhoneFilter !== 'ALL' && phoneGroups[selectedPhoneFilter])
+                ? phoneGroups[selectedPhoneFilter]
+                : lastActiveGroup;
+
+            if (!targetGroup || !targetGroup.currentStation) return;
+
+            const st = targetGroup.currentStation;
+            const visit = st.visits[st.visits.length - 1];
+
+            if (selectedPhoneFilter === 'ALL') {
+                document.getElementById('kpi-count-label').innerText = `전체 기지국 (${phoneOrder.length}명)`;
+                document.getElementById('kpi-count').innerText = `${Object.keys(allStationsMap).length} 개소`;
+            } else {
+                const disp = selectedPhoneFilter.startsWith('#') ? `뒷자리 ${selectedPhoneFilter.substring(1)}` : selectedPhoneFilter;
+                document.getElementById('kpi-count-label').innerText = `📱 ${disp}`;
+                document.getElementById('kpi-count').innerText = `${targetGroup.stations.length} 개소`;
+            }
+
+            document.getElementById('kpi-pci').innerText = `PCI ${st.pci}`;
+
+            const statusEl = document.getElementById('kpi-status');
+            const statusCard = document.getElementById('kpi-status-card');
+            const headerDot = document.getElementById('header-dot');
+
+            if (visit.isOffline) {
+                const elapsed = formatDurationMin(visit.startDate, new Date());
+                statusEl.innerText = `⚫ 전원꺼짐 (${elapsed} 경과)`;
+                statusEl.style.color = "#ffab00";
+                statusCard.classList.add('offline');
+                headerDot.classList.add('offline');
+            } else {
+                if (visit.count > 1) {
+                    const stayStr = formatDurationMin(visit.startDate, visit.endDate);
+                    statusEl.innerText = `🟢 ${stayStr}째 체류 (${visit.endTimeStr})`;
+                } else {
+                    statusEl.innerText = `🟢 켜짐 (${visit.endTimeStr})`;
+                }
+                statusEl.style.color = "#00e676";
+                statusCard.classList.remove('offline');
+                headerDot.classList.remove('offline');
+            }
+
+            let totalKm = 0;
+            const coords = targetGroup.routeCoords;
+            for (let i = 1; i < coords.length; i++) {
+                totalKm += calcDistKm(coords[i-1].lat, coords[i-1].lng, coords[i].lat, coords[i].lng);
+            }
+            document.getElementById('kpi-dist').innerText = `${totalKm.toFixed(2)} km`;
+        }
+
+        function createNewLogCard(st, visit) {
+            const list = document.getElementById('target-list');
+            if (logSeqCounter === 1) list.innerHTML = '';
+
+            const cleanAddrForSearch = st.address.replace(/\(.*?\)/g, '').trim();
+            const card = document.createElement('div');
+            card.className = visit.isOffline ? 'target-card offline-card' : 'target-card';
+            card.style.borderLeftColor = st.color;
+            card.id = `log-card-${visit.logCardId}`;
+            card.setAttribute('data-phone', st.phone);
+
+            if (selectedPhoneFilter !== 'ALL' && selectedPhoneFilter !== st.phone) {
+                card.style.display = 'none';
+            }
+
+            const statusBadge = visit.isOffline 
+                ? `<span class="t-status-tag off" id="log-status-${visit.logCardId}">⚫ 전원 꺼짐 (${formatDurationMin(visit.startDate, new Date())}째 꺼져 있음)</span>`
+                : `<span class="t-status-tag on" id="log-status-${visit.logCardId}">🟢 신호 활성</span>`;
+
+            const revisitNotice = st.visits.length > 1 ? ` <b style="color:#ffab00;">[${st.visits.length}차 방문]</b>` : '';
+            const displayPhone = st.phone.startsWith('#') ? `뒷자리 ${st.phone.substring(1)}` : st.phone;
+
+            card.innerHTML = `
+                <div style="cursor:pointer; width:100%;" onclick="kakaoMap.panTo(new kakao.maps.LatLng(${st.lat}, ${st.lng})); openHistoryModal(${st.stationUid});">
+                    <div>
+                        <span class="t-phone-tag" style="background:${st.color};">📱 ${displayPhone}</span>
+                        <span class="t-badge" style="background:${ visit.isOffline ? '#ff1744' : st.color };">기지국 #${st.seq}</span>
+                        ${statusBadge}
+                        <span class="t-addr">${st.address}${revisitNotice}</span>
+                    </div>
+                    <div class="t-meta" id="log-meta-${visit.logCardId}">
+                        기지국 PCI: <b>${st.pci}</b> | 확인일시: <b>${visit.startTimeStr}</b> | 상세이력 보기(터치)
+                    </div>
+                </div>
+                <div class="t-links">
+                    <a href="https://map.kakao.com/link/map/${encodeURIComponent(cleanAddrForSearch)},${st.lat},${st.lng}" target="_blank">카카오맵</a>
+                    <a href="https://map.kakao.com/link/roadview/${st.lat},${st.lng}" target="_blank">로드뷰</a>
+                    <a href="https://map.naver.com/p/search/${encodeURIComponent(cleanAddrForSearch)}" target="_blank">네이버</a>
+                </div>
+            `;
+            list.prepend(card);
+        }
+
+        function updateExistingLogCard(st, visit) {
+            const statusEl = document.getElementById(`log-status-${visit.logCardId}`);
+            const metaEl = document.getElementById(`log-meta-${visit.logCardId}`);
+
+            if (!visit.isOffline) {
+                const stayStr = formatDurationMin(visit.startDate, visit.endDate);
+                if (statusEl) {
+                    statusEl.innerText = `🟢 동일 기지국 ${stayStr}간 체류 (${visit.count}회 연속 수신)`;
+                }
+                if (metaEl) {
+                    metaEl.innerHTML = `기지국 PCI: <b>${st.pci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
+                }
+                sysLog(`[동일 PCI 연속수신] ${st.phone} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+            } else {
+                const elapsed = formatDurationMin(visit.startDate, new Date());
+                if (statusEl) {
+                    statusEl.innerText = `⚫ 전원 꺼짐 (${elapsed}째 꺼져 있음 / ${visit.count}회 수신)`;
+                }
+            }
+        }
+
+        function zoomMap(delta) {
+            if (!kakaoMap) return;
+            kakaoMap.setLevel(kakaoMap.getLevel() + delta, { animate: true });
+        }
+        function focusLastTarget() {
+            const targetGroup = (selectedPhoneFilter !== 'ALL' && phoneGroups[selectedPhoneFilter])
+                ? phoneGroups[selectedPhoneFilter]
+                : lastActiveGroup;
+            if (!kakaoMap || !targetGroup || !targetGroup.currentStation) return;
+            kakaoMap.panTo(new kakao.maps.LatLng(targetGroup.currentStation.lat, targetGroup.currentStation.lng));
+        }
+        function toggleBottomSheet() {
+            const panel = document.getElementById('bottom-panel');
+            const btn = document.getElementById('toggle-sheet-btn');
+            panel.classList.toggle('collapsed');
+            const isCollapsed = panel.classList.contains('collapsed');
+            btn.innerText = isCollapsed ? "▲ 패널 펼치기" : "▼ 패널 접기";
+            setTimeout(() => { if (kakaoMap) kakaoMap.relayout(); }, 280);
+        }
+        function switchMobileTab(tab) {
+            const targetList = document.getElementById('target-list');
+            const sysConsole = document.getElementById('sys-console');
+            const btnTargets = document.getElementById('tab-targets');
+            const btnConsole = document.getElementById('tab-console');
+
+            if (tab === 'targets') {
+                targetList.classList.remove('mobile-hide');
+                sysConsole.classList.remove('mobile-show');
+                btnTargets.classList.add('active');
+                btnConsole.classList.remove('active');
+            } else {
+                targetList.classList.add('mobile-hide');
+                sysConsole.classList.add('mobile-show');
+                btnTargets.classList.remove('active');
+                btnConsole.classList.add('active');
+            }
+        }
+
+        function calcDistKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function handleManualSms() {
+            const input = document.getElementById('sms-input');
+            if (!input.value.trim()) return;
+            window.receiveSmsFromAndroid(input.value);
+            input.value = '';
+        }
+
+        function clearAllTargets() {
+            phoneOrder.forEach(phone => {
+                const g = phoneGroups[phone];
+                if (g.polyline) g.polyline.setMap(null);
+                g.stations.forEach(st => {
+                    if (st.circle) st.circle.setMap(null);
+                    if (st.overlay) st.overlay.setMap(null);
+                });
+            });
+            phoneGroups = {};
+            phoneOrder = [];
+            selectedPhoneFilter = 'ALL';
+            allStationsMap = {};
+            stationUidCounter = 0;
+            logSeqCounter = 0;
+            lastActiveGroup = null;
+
+            renderPhoneFilterBar();
+            document.getElementById('kpi-count-label').innerText = "포착 기지국";
+            document.getElementById('kpi-count').innerText = "0 개소";
+            document.getElementById('kpi-status').innerText = "대기중";
+            document.getElementById('kpi-status').style.color = "var(--neon-green)";
+            document.getElementById('kpi-status-card').classList.remove('offline');
+            document.getElementById('header-dot').classList.remove('offline');
+            document.getElementById('kpi-pci').innerText = "-";
+            document.getElementById('kpi-dist').innerText = "0.00 km";
+            document.getElementById('target-list').innerHTML = '<div style="color:#689fb8; text-align:center; padding-top:18px;">[초기화 완료] 모든 전화번호의 마커와 이동 경로가 삭제되었습니다.</div>';
+            sysLog("모든 추적 데이터가 초기화되었습니다.", "#ffab00");
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            document.getElementById('sound-btn').innerText = soundEnabled ? "🔊 알림" : "🔇 무음";
+        }
+
+        function playTacticalBeep(isOffline) {
+            if (!soundEnabled) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                if (isOffline) {
+                    osc.frequency.setValueAtTime(620, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(280, ctx.currentTime + 0.22);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.24);
+                } else {
+                    osc.frequency.setValueAtTime(980, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(1480, ctx.currentTime + 0.09);
+                    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.11);
+                }
+            } catch (e) {}
+        }
+    </script>
+</body>
+</html>
