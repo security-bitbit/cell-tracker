@@ -1,235 +1,149 @@
 // =====================================================================
-// ★ [문자 파서 및 날짜/시간 유틸리티 모듈] ★
+// ★ [SKT / KT / LGU+ 기지국 위치추적 문자 통합 파서 모듈 - LGU+ 괄호 PCI 완벽 대응] ★
 // =====================================================================
 
-// Date 객체를 "MM.DD. HH:mm" 형태로 포맷팅 (일 뒤에도 마침표 추가!)
-function formatDateTimeShort(dateObj) {
-    if (!dateObj || isNaN(dateObj.getTime())) return "-";
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const dd = String(dateObj.getDate()).padStart(2, '0');
-    const hh = String(dateObj.getHours()).padStart(2, '0');
-    const min = String(dateObj.getMinutes()).padStart(2, '0');
-    return `${mm}.${dd}. ${hh}:${min}`;
-}
+function parseSmsContent(rawText) {
+    // 줄바꿈 및 불필요한 공백 정리, [Web발신] 태그 제거
+    let text = rawText.replace(/\r\n|\r|\n/g, ' ').replace(/\[Web발신\]/gi, '').trim();
 
-// 문자 내 날짜/시간 문자열을 Date 객체와 "MM.DD. HH:mm" 문자열로 변환
-function parseDateTimeInfo(rawDateStr, rawTimeStr) {
-    const now = new Date();
-    let yr = now.getFullYear();
-    let mo = now.getMonth();
-    let da = now.getDate();
-    let hh = now.getHours();
-    let mi = now.getMinutes();
-    let se = 0;
+    // 1. 전원 꺼짐 / 켜짐(위치확인) 상태 판별
+    const isOffline = /(꺼짐|전원\s*꺼짐|전원꺼짐|착신전환|통화불가|오프라인|해지|정지|불가|OFF)/i.test(text);
 
-    if (rawTimeStr) {
-        const tParts = rawTimeStr.split(':');
-        hh = parseInt(tParts[0], 10);
-        mi = parseInt(tParts[1], 10);
-        if (tParts[2]) se = parseInt(tParts[2], 10);
-    }
-
-    if (rawDateStr) {
-        const dParts = rawDateStr.split(/[-./]/).filter(Boolean);
-        if (dParts.length === 3) {
-            yr = parseInt(dParts[0], 10);
-            if (yr < 100) yr += 2000;
-            mo = parseInt(dParts[1], 10) - 1;
-            da = parseInt(dParts[2], 10);
-        } else if (dParts.length === 2) {
-            mo = parseInt(dParts[0], 10) - 1;
-            da = parseInt(dParts[1], 10);
+    // 2. 전화번호 추출 (010-XXXX-XXXX, 010XXXXXXXX 또는 LGU+ 형태 8자리 번호 등)
+    let phone = "번호미상";
+    const fullPhoneMatch = text.match(/(01[016789])[-\s.]?(\d{3,4})[-\s.]?(\d{4})/);
+    if (fullPhoneMatch) {
+        phone = `#${fullPhoneMatch[3]}`; // 뒷자리 4자리로 그룹핑
+    } else {
+        // LGU+ 샘플처럼 [281]39504786[0611-17:12] 형태의 번호 추출
+        const lgPhoneMatch = text.match(/(?:\[\s*\d{1,4}\s*\]|\(\s*\d{1,4}\s*\))\s*(\d{7,11})/);
+        if (lgPhoneMatch) {
+            const numStr = lgPhoneMatch[1];
+            phone = `#${numStr.slice(-4)}`;
+        } else {
+            const eightDigitMatch = text.match(/(?:^|\D)(\d{8})(?:\D|$)/);
+            if (eightDigitMatch) {
+                phone = `#${eightDigitMatch[1].slice(-4)}`;
+            }
         }
     }
 
-    const resultDate = new Date(yr, mo, da, hh, mi, se);
-    if (!rawDateStr && (resultDate.getTime() - now.getTime() > 60000)) {
-        resultDate.setDate(resultDate.getDate() - 1);
+    // 3. 날짜 및 시간 추출
+    let dateObj = new Date();
+    let timeStr = formatTimeHM(dateObj);
+
+    // 패턴 A: LGU+ 등 [MMdd-HH:mm] 또는 [MM/dd HH:mm] 형태 (예: [0611-17:12])
+    const bracketDateMatch = text.match(/\[\s*(\d{2})[-/.]?(\d{2})[-\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*\]/);
+    // 패턴 B: 일반 날짜+시간 (예: 2026-06-11 17:12, 06/11 17:12:30)
+    const generalDateMatch = text.match(/(?:(\d{4})[-/.])?(\d{1,2})[-/.](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    // 패턴 C: 시간만 있는 경우 (예: 17:12:30 또는 17:12)
+    const timeOnlyMatch = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+
+    if (bracketDateMatch) {
+        const month = parseInt(bracketDateMatch[1], 10) - 1;
+        const day = parseInt(bracketDateMatch[2], 10);
+        const hour = parseInt(bracketDateMatch[3], 10);
+        const min = parseInt(bracketDateMatch[4], 10);
+        const sec = bracketDateMatch[5] ? parseInt(bracketDateMatch[5], 10) : 0;
+        dateObj = new Date(dateObj.getFullYear(), month, day, hour, min, sec);
+        timeStr = `${ pad2(month + 1) }/${ pad2(day) } ${ pad2(hour) }:${ pad2(min) }`;
+    } else if (generalDateMatch) {
+        const year = generalDateMatch[1] ? parseInt(generalDateMatch[1], 10) : dateObj.getFullYear();
+        const month = parseInt(generalDateMatch[2], 10) - 1;
+        const day = parseInt(generalDateMatch[3], 10);
+        const hour = parseInt(generalDateMatch[4], 10);
+        const min = parseInt(generalDateMatch[5], 10);
+        const sec = generalDateMatch[6] ? parseInt(generalDateMatch[6], 10) : 0;
+        dateObj = new Date(year, month, day, hour, min, sec);
+        timeStr = `${ pad2(month + 1) }/${ pad2(day) } ${ pad2(hour) }:${ pad2(min) }`;
+    } else if (timeOnlyMatch) {
+        const hour = parseInt(timeOnlyMatch[1], 10);
+        const min = parseInt(timeOnlyMatch[2], 10);
+        const sec = timeOnlyMatch[3] ? parseInt(timeOnlyMatch[3], 10) : 0;
+        dateObj.setHours(hour, min, sec, 0);
+        timeStr = `${ pad2(hour) }:${ pad2(min) }`;
     }
 
+    // ★ 4. PCI 값 추출 (SKT/KT 명시형 + LGU+ 앞쪽 괄호 `[281]` 또는 `(281)` 형태 완벽 지원) ★
+    let pci = "미상";
+
+    // (1순위) 'PCI: 281', 'PCI=281', 'CPI 281' 등 명시적 키워드가 있는 경우
+    const explicitPciMatch = text.match(/(?:PCI|CPI|물리ID|기지국ID)\s*[:=\-]?\s*(\d{1,4})/i);
+    if (explicitPciMatch) {
+        pci = explicitPciMatch[1];
+    } else {
+        // (2순위) LGU+ 형태: 문자 내 대괄호 [숫자] 또는 소괄호 (숫자) 전수 조사
+        // 예: "[281]39504786[0611-17:12]꺼짐-인천..." 또는 "(281) 39504786..."
+        const bracketNumbers = [...text.matchAll(/[\[\(]\s*(\d{1,4})\s*[\]\)]/g)];
+        for (const match of bracketNumbers) {
+            const candidate = match[1];
+            const numVal = parseInt(candidate, 10);
+            // LTE/5G PCI 범위(0 ~ 1007) 내의 순수 숫자 괄호를 찾으면 즉시 PCI로 채택
+            if (!isNaN(numVal) && numVal >= 0 && numVal <= 1007) {
+                pci = candidate;
+                break;
+            }
+        }
+    }
+
+    // 5. 대한민국 주소 추출
+    let address = "";
+    // 불필요한 앞부분([PCI], 전화번호, [날짜시간], 켜짐/꺼짐 표시 등)을 먼저 걷어낸 클린 텍스트 생성
+    let cleanedForAddr = text
+        .replace(/\[\s*\d{1,4}\s*\]/g, ' ')
+        .replace(/\(\s*\d{1,4}\s*\)/g, ' ')
+        .replace(/\[\s*\d{2}[-/.]?\d{2}[-\s]+\d{1,2}:\d{2}(?::\d{2})?\s*\]/g, ' ')
+        .replace(/(?:PCI|CPI)\s*[:=\-]?\s*\d{1,4}/gi, ' ')
+        .replace(/(01[016789])[-\s.]?\d{3,4}[-\s.]?\d{4}/g, ' ')
+        .replace(/\b\d{7,11}\b/g, ' ')
+        .replace(/(전원\s*꺼짐|전원꺼짐|꺼짐|켜짐|정상|위치확인|착신전환|통화불가)\s*[-:\/]?/g, ' ')
+        .trim();
+
+    const krAddrRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|충청북도|충청남도|전라북도|전라남도|경상북도|경상남도|강원특별자치도|전북특별자치도|[가-힣]{2,5}(?:시|도|군|구))\s+[가-힣0-9\s\-]+?(?:로|길|동|읍|면|리|가)\s*(?:산\s*)?\d+(?:-\d+)?(?:\s*번지)?)/;
+    const krAddrFallbackRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|충청북도|충청남도|전라북도|전라남도|경상북도|경상남도|강원특별자치도|전북특별자치도|[가-힣]{2,5}(?:시|도|군|구))\s+[가-힣0-9\s\-]+?(?:로|길|동|읍|면|리|가))/;
+
+    const exactMatch = cleanedForAddr.match(krAddrRegex);
+    if (exactMatch) {
+        address = exactMatch[1].trim();
+    } else {
+        const fallbackMatch = cleanedForAddr.match(krAddrFallbackRegex);
+        if (fallbackMatch) {
+            address = fallbackMatch[1].trim();
+        }
+    }
+
+    // 주소 뒤쪽에 붙은 잔여 기호 정리
+    address = address.replace(/\s+/g, ' ').replace(/[-_,./]+$/, '').trim();
+
     return {
-        dateObj: resultDate,
-        displayStr: formatDateTimeShort(resultDate)
+        phone,
+        address,
+        pci,
+        dateObj,
+        timeStr,
+        isOffline
     };
 }
 
-// 두 Date 객체 사이의 분(minute) 차이를 한글 문자열로 변환
+function pad2(n) {
+    return n < 10 ? '0' + n : '' + n;
+}
+
+function formatTimeHM(d) {
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function formatDateTimeShort(d) {
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
 function formatDurationMin(startDate, endDate) {
     if (!startDate || !endDate) return "0분";
     const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
     const totalMin = Math.floor(diffMs / 60000);
-    if (totalMin < 1) {
-        const sec = Math.floor(diffMs / 1000);
-        return sec > 0 ? `${sec}초` : "1분 미만";
-    }
+    if (totalMin < 1) return "1분 미만";
     if (totalMin < 60) return `${totalMin}분`;
-    const hrs = Math.floor(totalMin / 60);
-    const mins = totalMin % 60;
-    return mins > 0 ? `${hrs}시간 ${mins}분` : `${hrs}시간`;
-}
-
-// 통신사 기지국 문자 통합 파서 (SKT, KT, LGU+ 모든 양식 대응)
-function parseSmsContent(text) {
-    let working = text.replace(/[\r\n]+/g, ' ').replace(/\[\s*Web\s*발신\s*\]/gi, ' ');
-    let phone = null;
-    let rawDate = null;
-    let rawTime = null;
-
-    // Step 0: LG U+ 특화 날짜·시간 포맷 우선 추출 -> 예: "[0611-17:12]"
-    const lguDateTimeRegex = /\[?\s*(\d{2})(\d{2})\s*[-./]\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*\]?/;
-    const lguDtMatch = working.match(lguDateTimeRegex);
-    if (lguDtMatch) {
-        const mm = parseInt(lguDtMatch[1], 10);
-        const dd = parseInt(lguDtMatch[2], 10);
-        if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-            rawDate = `${lguDtMatch[1]}-${lguDtMatch[2]}`;
-            rawTime = lguDtMatch[3];
-            working = working.replace(lguDtMatch[0], ' ');
-        }
-    }
-
-    // Step 1: 전체 번호(010-1234-5678), 마스킹 번호(010-****-5678), 또는 8자리 번호(39504786) 추출 -> 뒷 4자리("#4786")로 통일
-    const fullOrMaskedPhoneRegex = /(?:01[016789][-.\s]?(?:\d{3,4}|\*{3,4})[-.\s]?(\d{4}))|(?:\*{2,4}[-.\s]?(\d{4}))/;
-    const fmMatch = working.match(fullOrMaskedPhoneRegex);
-    if (fmMatch) {
-        const last4 = fmMatch[1] || fmMatch[2];
-        phone = `#${last4}`;
-        working = working.replace(fmMatch[0], ' ');
-    } else {
-        const eightDigitPhoneRegex = /(?:^|[\s\[\]()\/,-])(\d{4})[-.\s]?(\d{4})(?=$|[\s\[\]()\/,-])/;
-        const edMatch = working.match(eightDigitPhoneRegex);
-        if (edMatch) {
-            const first4 = parseInt(edMatch[1], 10);
-            if (first4 < 1990 || first4 > 2035) {
-                phone = `#${edMatch[2]}`;
-                working = working.replace(edMatch[0], ' ');
-            }
-        }
-    }
-
-    // Step 2: 전원 꺼짐 키워드 감지 ('(전원 꺼짐)', '꺼짐-' 등 모두 포함)
-    const offlineRegex = /\(\s*전원\s*꺼짐\s*\)|\[\s*전원\s*꺼짐\s*\]|전원\s*꺼짐|전원꺼짐|\(\s*꺼짐\s*\)|\[\s*꺼짐\s*\]|꺼짐\s*[-:/]|(?:^|\s)꺼짐(?=\s|$|-)|오프라인|착신\s*불가|전원\s*종료/i;
-    const isOffline = offlineRegex.test(working);
-    working = working.replace(offlineRegex, ' ');
-
-    // Step 3: 일반 날짜 및 시간 추출
-    if (!rawTime) {
-        const fullDateTimeRegex = /(\d{2,4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}[-./]\d{1,2})\.?\s+(\d{1,2}:\d{2}(?::\d{2})?)/;
-        const fullMatch = working.match(fullDateTimeRegex);
-        if (fullMatch) {
-            rawDate = fullMatch[1];
-            rawTime = fullMatch[2];
-            working = working.replace(fullMatch[0], ' ');
-        } else {
-            const timeOnlyRegex = /(\d{1,2}:\d{2}(?::\d{2})?)/;
-            const timeMatch = working.match(timeOnlyRegex);
-            if (timeMatch) {
-                rawTime = timeMatch[1];
-                working = working.replace(timeMatch[0], ' ');
-            }
-        }
-    }
-    const dtInfo = parseDateTimeInfo(rawDate, rawTime);
-
-    // Step 4: 명시적 라벨이 붙은 PCI/CPI 추출
-    let pci = null;
-    const explicitPci = working.match(/(?:PCI|CPI)\s*[:=\-]?\s*(\d{1,4})/i);
-    if (explicitPci) {
-        pci = explicitPci[1];
-        working = working.replace(explicitPci[0], ' ');
-    }
-
-    // Step 5: 명시적 라벨이 붙은 4자리 전화번호 추출
-    if (!phone) {
-        const labeledPhone = working.match(/(?:번호|대상|단말기|뒷자리|휴대폰|고객|#)\s*[:=\-]?\s*(\d{4})(?!\d)/);
-        if (labeledPhone) {
-            phone = `#${labeledPhone[1]}`;
-            working = working.replace(labeledPhone[0], ' ');
-        }
-    }
-
-    // Step 6: 대한민국 주소 영역 분리
-    let extractedAddr = null;
-    const korAddrRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|[가-힣]+(?:시|도|군|구))\s+[가-힣0-9\s\-]+(?:번길|로|길|동|읍|면|리|가)\s*[0-9\-산번지]*)/;
-    const addrMatch = working.match(korAddrRegex);
-    if (addrMatch) {
-        extractedAddr = addrMatch[1].trim();
-        working = working.replace(addrMatch[0], ' ');
-    }
-
-    // Step 7: 대괄호 `[숫자]` 및 소괄호 `(숫자)` 토큰 분석
-    const bracketRegex = /\[\s*(\d{1,4})\s*\]|\(\s*(\d{1,4})\s*\)/g;
-    let bMatch;
-    const bracketTokens = [];
-    while ((bMatch = bracketRegex.exec(working)) !== null) {
-        bracketTokens.push({ full: bMatch[0], digits: bMatch[1] || bMatch[2] });
-    }
-    bracketTokens.forEach(t => { working = working.replace(t.full, ' '); });
-
-    if (bracketTokens.length >= 2) {
-        const fourDigitIdx = bracketTokens.findIndex(t => t.digits.length === 4);
-        if (!phone && fourDigitIdx !== -1) {
-            phone = `#${bracketTokens[fourDigitIdx].digits}`;
-            bracketTokens.splice(fourDigitIdx, 1);
-        }
-        if (!pci && bracketTokens.length > 0) {
-            pci = bracketTokens[0].digits;
-        }
-    } else if (bracketTokens.length === 1) {
-        const d = bracketTokens[0].digits;
-        const numVal = parseInt(d, 10);
-        if (pci && !phone && d.length === 4) {
-            phone = `#${d}`;
-        } else if (phone && !pci) {
-            pci = d;
-        } else if (!phone && !pci) {
-            if (d.length === 4 && (numVal > 1007 || d.startsWith('0'))) {
-                phone = `#${d}`;
-            } else {
-                pci = d;
-            }
-        }
-    }
-
-    // Step 8: 독립 4자리 숫자 전화번호 확인
-    if (!phone) {
-        const standalone4 = working.match(/(?:^|\s|\/|,|:)(\d{4})(?=\s|$|\/|,|\)|\]|-)/);
-        if (standalone4) {
-            phone = `#${standalone4[1]}`;
-            working = working.replace(standalone4[1], ' ');
-        }
-    }
-
-    // Step 9: 독립 1~3자리 숫자 PCI 확인
-    if (!pci) {
-        const standalonePci = working.match(/(?:^|\s|\/|,|:)(\d{1,3})(?=\s|$|\/|,|\)|\])/);
-        if (standalonePci) {
-            pci = standalonePci[1];
-        }
-    }
-
-    if (!extractedAddr) {
-        extractedAddr = working
-            .replace(/\[.*?\]/g, ' ')
-            .replace(/\(.*?\)/g, ' ')
-            .replace(/(조회시간|기지국주소|기지국위치|위치정보|대상번호|전화번호|휴대폰|주소|시간|발신|회신|PCI|CPI)\s*[:=\-]?/gi, ' ')
-            .replace(/\s+(인근|일대|주변|부근|앞|뒤|내|기지국|옥상|철탑).*$/g, '')
-            .replace(/^[\s\-:/|,]+/, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-    } else {
-        extractedAddr = extractedAddr
-            .replace(/\s+(인근|일대|주변|부근|앞|뒤|내|기지국|옥상|철탑).*$/g, '')
-            .replace(/^[\s\-:/|,]+/, '')
-            .trim();
-    }
-
-    return {
-        phone: phone || "번호미상",
-        address: extractedAddr,
-        pci: pci || "미상",
-        dateObj: dtInfo.dateObj,
-        timeStr: dtInfo.displayStr, // "MM.DD. HH:mm" 형태
-        isOffline: isOffline
-    };
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
 }
