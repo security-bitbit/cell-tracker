@@ -826,3 +826,25 @@ header {
     .t-links { width: 100%; justify-content: flex-end; margin-top: 4px; }
     .t-links a { flex: 1; text-align: center; }
 }
+/* =================================================================
+   ★ 지도 드래그 간섭 방지 패치: 라벨은 터치 통과, 동그란 점만 클릭 허용
+   ================================================================= */
+.tactical-node,
+.tactical-node .node-label,
+.tactical-node .node-mini-badge,
+.tactical-node .ripple-ring {
+    pointer-events: none !important; /* 라벨 위를 잡고 끌어도 지도가 부드럽게 이동됨 */
+}
+
+.tactical-node .node-core {
+    pointer-events: auto !important; /* 동그란 기지국 점만 터치 가능 */
+    cursor: pointer;
+    position: relative;
+}
+
+/* 동그란 점이 작아서 누르기 힘들지 않도록 투명 터치 영역만 살짝 확장 */
+.tactical-node .node-core::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+}
