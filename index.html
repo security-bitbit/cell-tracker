@@ -5,29 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>ARGUS (아르고스) - 경찰 기지국 위치추적 시스템</title>
     <!-- 디자인 파일 연결 -->
-    <link rel="stylesheet" href="./style.css?v=1.1.1">
+    <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 
-    <!-- 1. 상단 헤더 (방법 2: 윗줄 전체 유지 + 폭 압축형) -->
-    <header style="gap:4px;">
-        <div class="brand" style="min-width:0; flex:1;">
-            <div class="radar-dot" id="header-dot" style="flex-shrink:0;"></div>
-            <div class="brand-stack" style="min-width:0;">
-                <div class="brand-top-row" style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
-                    <span class="brand-title" style="font-size:14px; letter-spacing:-0.5px;">
-                        <span style="color:#ffffff;">아르고스</span>
-                        <span style="font-size:10.5px; font-weight:600; margin-left:2px; letter-spacing:-0.8px;">경찰 기지국 위치추적 시스템</span>
-                    </span>
-                    <span class="ver-badge" id="header-ver-badge" onclick="openInfoModal('changelog')" title="업데이트 내역 확인" style="padding:1px 4px; font-size:9.5px; flex-shrink:0;">v1.1.0</span>
+    <!-- 1. 상단 헤더 (3줄 콤팩트 배치로 작은 폰 화면에서도 우측 버튼과 겹침 방지) -->
+    <header>
+        <div class="brand">
+            <div class="radar-dot" id="header-dot"></div>
+            <div class="brand-stack" style="line-height: 1.25;">
+                <div class="brand-top-row">
+                    <span class="brand-title" style="color:#ffffff;">아르고스</span>
+                    <span class="ver-badge" id="header-ver-badge" onclick="openInfoModal('changelog')" title="업데이트 내역 확인">v1.1.0</span>
                 </div>
+                <div class="brand-sub" style="color:#00e5ff; font-weight:600;">경찰 기지국 위치추적 시스템</div>
                 <div class="brand-sub">인천계양경찰서 황시원 순경 제작</div>
             </div>
         </div>
-        <div class="top-actions" style="display:flex; gap:4px; flex-shrink:0;">
-            <button class="btn btn-amber" style="padding:4px 6px; font-size:11px;" onclick="openInfoModal('feedback')">💌 제보</button>
-            <button class="btn btn-green" id="sound-btn" style="padding:4px 6px; font-size:11px;" onclick="toggleSound()">🔊 알림</button>
-            <button class="btn btn-red" style="padding:4px 6px; font-size:11px;" onclick="openResetModal()">초기화</button>
+        <div class="top-actions">
+            <button class="btn btn-amber" onclick="openInfoModal('feedback')">💌 제보</button>
+            <button class="btn btn-green" id="sound-btn" onclick="toggleSound()">🔊 알림</button>
+            <button class="btn btn-red" onclick="openResetModal()">초기화</button>
         </div>
     </header>
 
@@ -203,8 +201,8 @@
     </div>
 
     <!-- 분리된 자바스크립트 모듈 순서대로 불러오기 -->
-    <script src="./config.js?v=1.1.1"></script>
-    <script src="./parser.js?v=1.1.1"></script>
-    <script src="./app.js?v=1.1.1"></script>
+    <script src="./config.js"></script>
+    <script src="./parser.js"></script>
+    <script src="./app.js"></script>
 </body>
 </html>

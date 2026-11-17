@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [메인 애플리케이션 및 카카오맵 제어 모듈 - 자동 백업/복원 탑재] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 자동 백업/복원 탑재] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -33,6 +33,43 @@ function sysLog(msg, color = '#00e676') {
     line.style.color = color;
     line.innerHTML = `[${dtStr}] &gt; ${msg}`;
     box.prepend(line);
+}
+
+// ★ 번호 표시 변환 함수: 평소엔 '4786'만 표시, 뒷자리가 겹치는 가족/공범 번호가 있으면 '3950-4786' 자동 표시!
+function formatPhoneDisplay(phoneKey) {
+    if (!phoneKey || phoneKey === "번호미상") return "번호미상";
+    const cleanKey = phoneKey.replace(/^#/, '');
+    const parts = cleanKey.split('-');
+    const last4 = parts[parts.length - 1];
+
+    // 현재 추적 중인 전체 번호 목록에서 동일한 뒷자리(4자리)가 2개 이상 있는지 검사
+    const sameLast4Count = phoneOrder.filter(p => p.replace(/^#/, '').endsWith(last4)).length;
+
+    // 뒷자리가 겹치면 '3950-4786' 전체 표시, 안 겹치면 깔끔하게 '4786'만 표시
+    return (sameLast4Count > 1 && parts.length > 1) ? cleanKey : last4;
+}
+
+// ★ 새로운 번호가 추가/삭제되어 뒷자리 중복 여부가 바뀔 때 기존 마커와 로그 카드의 번호 표기를 즉시 갱신
+function refreshAllPhoneLabelsOnUI() {
+    phoneOrder.forEach(p => {
+        const g = phoneGroups[p];
+        if (!g) return;
+        g.stations.forEach(st => {
+            const isCurr = (g.currentStation === st);
+            if (st.overlay) {
+                st.overlay.setContent(buildStationMarkerHtml(st, isCurr));
+            }
+        });
+    });
+
+    const cards = document.querySelectorAll('#target-list .target-card');
+    cards.forEach(card => {
+        const cardPhone = card.getAttribute('data-phone');
+        const tagEl = card.querySelector('.t-phone-tag');
+        if (cardPhone && tagEl) {
+            tagEl.innerText = `📱 ${formatPhoneDisplay(cardPhone)}`;
+        }
+    });
 }
 
 // ★ 로컬 스토리지에 현재까지의 추적 신호 내역 저장
@@ -78,7 +115,7 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('report-email-display').innerText = REPORT_EMAIL;
     renderChangelogList();
 
-    sysLog(`기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
+    sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
 
     try {
         const lastSeenVer = localStorage.getItem('CELL_TRACKER_SEEN_VERSION');
@@ -182,7 +219,7 @@ function fallbackCopyEmail() {
 window.sendFeedbackMail = function() {
     const type = document.getElementById('fb-type').value;
     const bodyText = document.getElementById('fb-body').value.trim();
-    const subject = `[기지국위치추적 ${APP_VERSION}] ${type}`;
+    const subject = `[아르고스(ARGUS) ${APP_VERSION}] ${type}`;
     const content = `■ 프로그램 버전: ${APP_VERSION}\n■ 제보 유형: ${type}\n\n■ 상세 내용:\n${bodyText || '(내용을 입력해 주세요)'}\n`;
     window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(content)}`;
 };
@@ -204,7 +241,7 @@ function renderResetModalList() {
     const box = document.getElementById('reset-phone-list-box');
     box.innerHTML = phoneOrder.map(phone => {
         const g = phoneGroups[phone];
-        const displayPhone = phone.startsWith('#') ? `뒷자리 ${phone.substring(1)}` : phone;
+        const displayPhone = formatPhoneDisplay(phone);
         return `
             <div class="reset-phone-item" style="border-left-color:${g.color};">
                 <div class="reset-phone-info">
@@ -219,7 +256,7 @@ function renderResetModalList() {
 }
 
 window.confirmAndClearSinglePhone = function(phoneKey) {
-    const displayPhone = phoneKey.startsWith('#') ? `뒷자리 ${phoneKey.substring(1)}` : phoneKey;
+    const displayPhone = formatPhoneDisplay(phoneKey);
     const ok = confirm(`정말 [📱 ${displayPhone}] 대상자의 추적 동선과 기록을 삭제하시겠습니까?\n(다른 전화번호의 기록은 그대로 유지됩니다.)`);
     if (!ok) return;
 
@@ -262,6 +299,7 @@ window.confirmAndClearSinglePhone = function(phoneKey) {
         lastActiveGroup = phoneGroups[phoneOrder[phoneOrder.length - 1]];
     }
 
+    refreshAllPhoneLabelsOnUI();
     renderPhoneFilterBar();
     filterLogCardsByPhone();
     refreshTopDashboard();
@@ -378,7 +416,7 @@ window.cycleLabelMode = function() {
         btn.classList.remove('off');
     } else if (labelMode === 'ALWAYS') {
         labelMode = 'HIDE_PAST';
-        btn.innerText = "🏷️ 경유지 라벨: 숨김(번호만)";
+        btn.innerText = "🏷️ 경유지 라벨: 숨김(PCI만)";
         btn.classList.add('off');
     } else {
         labelMode = 'AUTO';
@@ -529,6 +567,9 @@ function getOrCreatePhoneGroup(phone) {
             currentStation: null
         };
         phoneOrder.push(phone);
+
+        // ★ 새 번호가 추가되었을 때 기존 번호와 뒷자리가 겹치면 기존 라벨도 '3950-4786' 형태로 즉시 업데이트!
+        refreshAllPhoneLabelsOnUI();
     }
     return phoneGroups[phone];
 }
@@ -570,7 +611,7 @@ function processLocationSignal(lat, lng, parsed) {
                 badgeEl.innerText = `⚫ 전원 재부팅됨 (총 ${offDurationStr}간 꺼져 있었음: ${prevVisit.startTimeStr} ~ ${timeStr})`;
             }
             if (!isRestoringHistory) {
-                sysLog(`[전원 재부팅 / 위치변경] ${phone} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
+                sysLog(`[전원 재부팅 / 위치변경] ${formatPhoneDisplay(phone)} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
             }
         }
 
@@ -627,7 +668,7 @@ function processLocationSignal(lat, lng, parsed) {
         station.overlay.setContent(buildStationMarkerHtml(station, true));
         group.currentStation = station;
         if (!isRestoringHistory) {
-            sysLog(`[재방문 감지] ${phone} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
+            sysLog(`[재방문 감지] ${formatPhoneDisplay(phone)} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
         }
     } else {
         stationUidCounter++;
@@ -685,7 +726,7 @@ function processLocationSignal(lat, lng, parsed) {
 
 function getShortPhoneLabel(phone) {
     if (phone === "번호미상") return "";
-    return `<span class="phone-mini">📱${phone}</span>`;
+    return `<span class="phone-mini">📱${formatPhoneDisplay(phone)}</span>`;
 }
 
 function buildStationMarkerHtml(st, isCurrentActive) {
@@ -727,7 +768,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
-    // ★ 수정 포인트: 지도가 축소됐을 때 뜨는 미니 배지(node-mini-badge)에 전화번호 대신 'PCI 값' 표시!
+    // ★ 지도가 축소됐을 때 뜨는 미니 배지(node-mini-badge)에 'PCI 값' 표시!
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
     const miniPciText = st.pci !== '미상' ? `PCI:${st.pci}` : `#${st.seq}`;
@@ -759,7 +800,7 @@ function renderPhoneFilterBar() {
         const isSel = (selectedPhoneFilter === phone) ? 'selected' : '';
         const isHidden = !g.visible ? 'hidden-on-map' : '';
         const eyeIcon = g.visible ? '👁️켜짐' : '🚫꺼짐';
-        const displayPhone = phone.startsWith('#') ? `뒷자리 ${phone.substring(1)}` : phone;
+        const displayPhone = formatPhoneDisplay(phone);
 
         html += `
             <div class="phone-chip ${isSel} ${isHidden}" style="border-color:${g.color};" onclick="selectPhoneFilter('${phone}')">
@@ -791,7 +832,7 @@ window.togglePhoneVisibility = function(phoneKey) {
     g.visible = !g.visible;
     syncMapLayersVisibility();
     renderPhoneFilterBar();
-    sysLog(`[표시 제어] ${phoneKey} 동선 및 마커 ${g.visible ? '표시(ON)' : '숨김(OFF)'}`, "#00e5ff");
+    sysLog(`[표시 제어] ${formatPhoneDisplay(phoneKey)} 동선 및 마커 ${g.visible ? '표시(ON)' : '숨김(OFF)'}`, "#00e5ff");
 };
 
 function filterLogCardsByPhone() {
@@ -810,7 +851,7 @@ window.openHistoryModal = function(stationUid) {
     const st = allStationsMap[stationUid];
     if (!st) return;
 
-    const displayPhone = st.phone.startsWith('#') ? `번호 뒷자리 ${st.phone.substring(1)}` : st.phone;
+    const displayPhone = formatPhoneDisplay(st.phone);
     document.getElementById('hist-title').innerText = `📍 [${displayPhone}] 기지국 #${st.seq} (PCI: ${st.pci}) 이력`;
     document.getElementById('hist-addr').innerText = st.address;
 
@@ -876,7 +917,7 @@ function refreshTopDashboard() {
         document.getElementById('kpi-count-label').innerText = `전체 기지국 (${phoneOrder.length}명)`;
         document.getElementById('kpi-count').innerText = `${Object.keys(allStationsMap).length} 개소`;
     } else {
-        const disp = selectedPhoneFilter.startsWith('#') ? `뒷자리 ${selectedPhoneFilter.substring(1)}` : selectedPhoneFilter;
+        const disp = formatPhoneDisplay(selectedPhoneFilter);
         document.getElementById('kpi-count-label').innerText = `📱 ${disp}`;
         document.getElementById('kpi-count').innerText = `${targetGroup.stations.length} 개소`;
     }
@@ -935,7 +976,7 @@ function createNewLogCard(st, visit) {
         : `<span class="t-status-tag on" id="log-status-${visit.logCardId}">🟢 신호 활성</span>`;
 
     const revisitNotice = st.visits.length > 1 ? ` <b style="color:#ffab00;">[${st.visits.length}차 방문]</b>` : '';
-    const displayPhone = st.phone.startsWith('#') ? `뒷자리 ${st.phone.substring(1)}` : st.phone;
+    const displayPhone = formatPhoneDisplay(st.phone);
 
     card.innerHTML = `
         <div style="cursor:pointer; width:100%;" onclick="kakaoMap.panTo(new kakao.maps.LatLng(${st.lat}, ${st.lng})); openHistoryModal(${st.stationUid});">
@@ -971,7 +1012,7 @@ function updateExistingLogCard(st, visit) {
             metaEl.innerHTML = `기지국 PCI: <b>${st.pci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
         }
         if (!isRestoringHistory) {
-            sysLog(`[동일 PCI 연속수신] ${st.phone} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+            sysLog(`[동일 PCI 연속수신] ${formatPhoneDisplay(st.phone)} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
         }
     } else {
         const elapsed = formatDurationMin(visit.startDate, new Date());
@@ -1065,6 +1106,7 @@ function playTacticalBeep(isOffline) {
         }
     } catch (e) {}
 }
+
 // =====================================================================
 // ★ [스마트 터치 판별기] 라벨 위를 끌면 지도 이동, 제자리 톡 누르면 상세정보 팝업!
 // =====================================================================

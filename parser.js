@@ -9,23 +9,28 @@ function parseSmsContent(rawText) {
     // 1. 전원 꺼짐 / 켜짐(위치확인) 상태 판별
     const isOffline = /(꺼짐|전원\s*꺼짐|전원꺼짐|착신전환|통화불가|오프라인|해지|정지|불가|OFF)/i.test(text);
 
-    // 2. 전화번호 추출 (010-XXXX-XXXX, 010XXXXXXXX 또는 LGU+ 형태 8자리 번호 등)
+    // 2. 전화번호 추출 (가운뎃자리-뒷자리 8자리 전체 보존으로 가족/동일 뒷번호 완벽 분리)
     let phone = "번호미상";
-    const fullPhoneMatch = text.match(/(01[016789])[-\s.]?(\d{3,4})[-\s.]?(\d{4})/);
-    if (fullPhoneMatch) {
-        phone = `#${fullPhoneMatch[3]}`; // 뒷자리 4자리로 그룹핑
-    } else {
-        // LGU+ 샘플처럼 [281]39504786[0611-17:12] 형태의 번호 추출
-        const lgPhoneMatch = text.match(/(?:\[\s*\d{1,4}\s*\]|\(\s*\d{1,4}\s*\))\s*(\d{7,11})/);
-        if (lgPhoneMatch) {
-            const numStr = lgPhoneMatch[1];
-            phone = `#${numStr.slice(-4)}`;
-        } else {
-            const eightDigitMatch = text.match(/(?:^|\D)(\d{8})(?:\D|$)/);
-            if (eightDigitMatch) {
-                phone = `#${eightDigitMatch[1].slice(-4)}`;
-            }
-        }
+    // 패턴 A: 010-3950-4786 또는 01039504786 형태
+    const mobileMatch = text.match(/01[016789][-\s.]?(\d{3,4})[-\s.]?(\d{4})/);
+    // 패턴 B: [281]39504786 형태 (LGU+ 등)
+    const lgPhoneMatch = text.match(/(?:\[\s*\d{1,4}\s*\]|\(\s*\d{1,4}\s*\))\s*(\d{7,11})/);
+    // 패턴 C: 3950-4786 형태
+    const hyphen8Match = text.match(/(?:^|\D)(\d{3,4})-(\d{4})(?:\D|$)/);
+    // 패턴 D: 연속 8자리 숫자 (39504786)
+    const plain8Match = text.match(/(?:^|\D)(\d{4})(\d{4})(?:\D|$)/);
+
+    if (mobileMatch) {
+        phone = `${mobileMatch[1]}-${mobileMatch[2]}`;
+    } else if (lgPhoneMatch) {
+        const numStr = lgPhoneMatch[1];
+        const mid = numStr.slice(-8, -4);
+        const last = numStr.slice(-4);
+        phone = mid ? `${mid}-${last}` : last;
+    } else if (hyphen8Match) {
+        phone = `${hyphen8Match[1]}-${hyphen8Match[2]}`;
+    } else if (plain8Match) {
+        phone = `${plain8Match[1]}-${plain8Match[2]}`;
     }
 
     // 3. 날짜 및 시간 추출
@@ -95,6 +100,7 @@ function parseSmsContent(rawText) {
         .replace(/\[\s*\d{2}[-/.]?\d{2}[-\s]+\d{1,2}:\d{2}(?::\d{2})?\s*\]/g, ' ')
         .replace(/(?:PCI|CPI)\s*[:=\-]?\s*\d{1,4}/gi, ' ')
         .replace(/(01[016789])[-\s.]?\d{3,4}[-\s.]?\d{4}/g, ' ')
+        .replace(/\b\d{3,4}-\d{4}\b/g, ' ')
         .replace(/\b\d{7,11}\b/g, ' ')
         .replace(/(전원\s*꺼짐|전원꺼짐|꺼짐|켜짐|정상|위치확인|착신전환|통화불가)\s*[-:\/]?/g, ' ')
         .trim();
