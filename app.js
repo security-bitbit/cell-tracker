@@ -1065,3 +1065,55 @@ function playTacticalBeep(isOffline) {
         }
     } catch (e) {}
 }
+// =====================================================================
+// ★ [스마트 터치 판별기] 라벨 위를 끌면 지도 이동, 제자리 톡 누르면 상세정보 팝업!
+// =====================================================================
+(function initSmartMarkerTap() {
+    let startX = 0, startY = 0, startTime = 0;
+
+    document.addEventListener('pointerdown', function(e) {
+        // 지도 영역(#map) 내부를 터치했을 때만 시작 위치 기록
+        if (!e.target.closest('#map')) return;
+        startX = e.clientX;
+        startY = e.clientY;
+        startTime = Date.now();
+    }, true);
+
+    document.addEventListener('pointerup', function(e) {
+        if (!startTime || !e.target.closest('#map')) return;
+
+        const moveX = Math.abs(e.clientX - startX);
+        const moveY = Math.abs(e.clientY - startY);
+        const elapsed = Date.now() - startTime;
+        startTime = 0;
+
+        // 손가락 이동거리가 10px 미만이고 0.4초 이내로 톡 눌렀을 때만 '클릭(Tap)'으로 인정!
+        // (손가락으로 잡고 끄는 드래그 동작일 때는 무시하고 지도만 부드럽게 움직임)
+        if (moveX < 10 && moveY < 10 && elapsed < 400) {
+            const nodes = document.querySelectorAll('.tactical-node');
+            for (const node of nodes) {
+                // 화면에 보이는 기지국 점(.node-core)과 라벨(.node-label, .node-mini-badge) 영역 확인
+                const targets = [
+                    node.querySelector('.node-core'),
+                    node.querySelector('.node-label'),
+                    node.querySelector('.node-mini-badge')
+                ];
+
+                for (const el of targets) {
+                    if (!el) continue;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) continue;
+
+                    // 터치한 좌표가 동그란 점이나 글자 라벨 박스 안쪽(여유 반경 6px 포함)이면 즉시 팝업 실행!
+                    if (
+                        e.clientX >= rect.left - 6 && e.clientX <= rect.right + 6 &&
+                        e.clientY >= rect.top - 6 && e.clientY <= rect.bottom + 6
+                    ) {
+                        node.click(); // 해당 기지국의 openHistoryModal() 실행
+                        return;
+                    }
+                }
+            }
+        }
+    }, true);
+})();
