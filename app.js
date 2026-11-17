@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈] ★
+// ★ [메인 애플리케이션 및 카카오맵 제어 모듈 - 자동 백업/복원 탑재] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -78,7 +78,7 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('report-email-display').innerText = REPORT_EMAIL;
     renderChangelogList();
 
-    sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
+    sysLog(`기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
 
     try {
         const lastSeenVer = localStorage.getItem('CELL_TRACKER_SEEN_VERSION');
@@ -182,7 +182,7 @@ function fallbackCopyEmail() {
 window.sendFeedbackMail = function() {
     const type = document.getElementById('fb-type').value;
     const bodyText = document.getElementById('fb-body').value.trim();
-    const subject = `[아르고스(ARGUS) ${APP_VERSION}] ${type}`;
+    const subject = `[기지국위치추적 ${APP_VERSION}] ${type}`;
     const content = `■ 프로그램 버전: ${APP_VERSION}\n■ 제보 유형: ${type}\n\n■ 상세 내용:\n${bodyText || '(내용을 입력해 주세요)'}\n`;
     window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(content)}`;
 };
@@ -378,7 +378,7 @@ window.cycleLabelMode = function() {
         btn.classList.remove('off');
     } else if (labelMode === 'ALWAYS') {
         labelMode = 'HIDE_PAST';
-        btn.innerText = "🏷️ 경유지 라벨: 숨김(PCI만)";
+        btn.innerText = "🏷️ 경유지 라벨: 숨김(번호만)";
         btn.classList.add('off');
     } else {
         labelMode = 'AUTO';
@@ -727,7 +727,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
-    // ★ 지도가 축소됐을 때 뜨는 미니 배지(node-mini-badge)에 전화번호 대신 'PCI 값' 표시!
+    // ★ 수정 포인트: 지도가 축소됐을 때 뜨는 미니 배지(node-mini-badge)에 전화번호 대신 'PCI 값' 표시!
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
     const miniPciText = st.pci !== '미상' ? `PCI:${st.pci}` : `#${st.seq}`;
