@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [메인 애플리케이션 및 카카오맵 제어 모듈] ★
+// ★ [메인 애플리케이션 및 카카오맵 제어 모듈 - 자동 백업/복원 탑재] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -19,6 +19,11 @@ let showRadius = true;
 let showRoute = true;
 let labelMode = 'AUTO';
 
+// ★ 앱을 껐다 켜도 기록이 유지되도록 로컬 스토리지에 보관할 키 이름과 배열
+const STORAGE_KEY_SIGNALS = 'CELL_TRACKER_SAVED_SIGNALS_V1';
+let savedSignalsHistory = [];
+let isRestoringHistory = false;
+
 function sysLog(msg, color = '#00e676') {
     const box = document.getElementById('sys-console');
     if (!box) return;
@@ -28,6 +33,43 @@ function sysLog(msg, color = '#00e676') {
     line.style.color = color;
     line.innerHTML = `[${dtStr}] &gt; ${msg}`;
     box.prepend(line);
+}
+
+// ★ 로컬 스토리지에 현재까지의 추적 신호 내역 저장
+function saveHistoryToStorage() {
+    if (isRestoringHistory) return;
+    try {
+        localStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify(savedSignalsHistory));
+    } catch (e) {}
+}
+
+// ★ 지도 로드 완료 시 이전 추적 기록 자동 복원
+function restoreHistoryFromStorage() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY_SIGNALS);
+        if (!raw) return;
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list) || list.length === 0) return;
+
+        isRestoringHistory = true;
+        savedSignalsHistory = [];
+        list.forEach(item => {
+            const restoredParsed = {
+                phone: item.phone,
+                address: item.address,
+                pci: item.pci,
+                dateObj: new Date(item.dateMs),
+                timeStr: item.timeStr,
+                isOffline: item.isOffline
+            };
+            processLocationSignal(item.lat, item.lng, restoredParsed);
+        });
+        isRestoringHistory = false;
+        saveHistoryToStorage();
+        sysLog(`[기록 자동 복원] 이전 추적 데이터 ${list.length}건을 성공적으로 불러왔습니다.`, "#00e5ff");
+    } catch (e) {
+        isRestoringHistory = false;
+    }
 }
 
 window.addEventListener('DOMContentLoaded', function() {
@@ -201,6 +243,10 @@ window.confirmAndClearSinglePhone = function(phoneKey) {
     delete phoneGroups[phoneKey];
     phoneOrder = phoneOrder.filter(p => p !== phoneKey);
 
+    // ★ 자동 백업 저장소에서도 해당 전화번호 기록만 제거
+    savedSignalsHistory = savedSignalsHistory.filter(item => item.phone !== phoneKey);
+    saveHistoryToStorage();
+
     sysLog(`[선택 초기화] 📱 ${displayPhone} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
 
     if (phoneOrder.length === 0) {
@@ -243,6 +289,10 @@ window.confirmAndClearAll = function() {
     logSeqCounter = 0;
     lastActiveGroup = null;
 
+    // ★ 자동 백업 저장소 전체 비우기
+    savedSignalsHistory = [];
+    try { localStorage.removeItem(STORAGE_KEY_SIGNALS); } catch (e) {}
+
     resetDashboardToEmpty();
     closeResetModal();
     sysLog("모든 추적 데이터가 전체 초기화되었습니다.", "#ffab00");
@@ -282,6 +332,9 @@ function loadKakaoMapSdk(appKey) {
             });
 
             sysLog(`카카오맵 연결 완료 (${APP_VERSION}). SKT·KT·LGU+ 실시간 문자 수신 대기중.`, "#00e676");
+
+            // ★ 지도가 준비되자마자 이전에 저장되어 있던 추적 기록을 즉시 복원합니다!
+            restoreHistoryFromStorage();
         });
     };
 
@@ -482,6 +535,20 @@ function getOrCreatePhoneGroup(phone) {
 
 function processLocationSignal(lat, lng, parsed) {
     const { phone, address, pci, dateObj: eventDate, timeStr, isOffline } = parsed;
+
+    // ★ 신호를 처리할 때마다 로컬 백업 배열에 추가하고 저장
+    savedSignalsHistory.push({
+        lat: lat,
+        lng: lng,
+        phone: phone,
+        address: address,
+        pci: pci,
+        dateMs: eventDate ? eventDate.getTime() : Date.now(),
+        timeStr: timeStr,
+        isOffline: isOffline
+    });
+    saveHistoryToStorage();
+
     const group = getOrCreatePhoneGroup(phone);
     lastActiveGroup = group;
 
@@ -502,7 +569,9 @@ function processLocationSignal(lat, lng, parsed) {
             if (badgeEl) {
                 badgeEl.innerText = `⚫ 전원 재부팅됨 (총 ${offDurationStr}간 꺼져 있었음: ${prevVisit.startTimeStr} ~ ${timeStr})`;
             }
-            sysLog(`[전원 재부팅 / 위치변경] ${phone} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
+            if (!isRestoringHistory) {
+                sysLog(`[전원 재부팅 / 위치변경] ${phone} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
+            }
         }
 
         if (isSamePci && prevVisit.isOffline === isOffline) {
@@ -515,7 +584,7 @@ function processLocationSignal(lat, lng, parsed) {
             updateExistingLogCard(prevStation, prevVisit);
             renderPhoneFilterBar();
             refreshTopDashboard();
-            playTacticalBeep(isOffline);
+            if (!isRestoringHistory) playTacticalBeep(isOffline);
             return;
         }
     }
@@ -557,7 +626,9 @@ function processLocationSignal(lat, lng, parsed) {
         });
         station.overlay.setContent(buildStationMarkerHtml(station, true));
         group.currentStation = station;
-        sysLog(`[재방문 감지] ${phone} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
+        if (!isRestoringHistory) {
+            sysLog(`[재방문 감지] ${phone} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
+        }
     } else {
         stationUidCounter++;
         const seq = group.stations.length + 1;
@@ -609,7 +680,7 @@ function processLocationSignal(lat, lng, parsed) {
     renderPhoneFilterBar();
     refreshTopDashboard();
     applyLabelVisibilityRule();
-    playTacticalBeep(isOffline);
+    if (!isRestoringHistory) playTacticalBeep(isOffline);
 }
 
 function getShortPhoneLabel(phone) {
@@ -896,7 +967,9 @@ function updateExistingLogCard(st, visit) {
         if (metaEl) {
             metaEl.innerHTML = `기지국 PCI: <b>${st.pci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
         }
-        sysLog(`[동일 PCI 연속수신] ${st.phone} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+        if (!isRestoringHistory) {
+            sysLog(`[동일 PCI 연속수신] ${st.phone} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+        }
     } else {
         const elapsed = formatDurationMin(visit.startDate, new Date());
         if (statusEl) {
