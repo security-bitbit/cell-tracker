@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 자동 백업/복원 탑재] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 커스텀 모달 탑재] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -35,6 +35,69 @@ function sysLog(msg, color = '#00e676') {
     box.prepend(line);
 }
 
+// =====================================================================
+// ★ [아르고스 전용 커스텀 알림창 / 확인창 제어 함수] (웹 기본 팝업 대체)
+// =====================================================================
+let customDialogCallback = null;
+
+window.closeCustomDialog = function() {
+    const modal = document.getElementById('custom-dialog-modal');
+    if (modal) modal.style.display = 'none';
+    customDialogCallback = null;
+};
+
+// 1) 단순 알림창 (기존 alert 대체)
+function showAppAlert(message, title = "🔔 아르고스 알림") {
+    const modal = document.getElementById('custom-dialog-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('cd-title');
+    const msgEl = document.getElementById('cd-message');
+    const cancelBtn = document.getElementById('cd-cancel-btn');
+    const okBtn = document.getElementById('cd-ok-btn');
+
+    titleEl.innerText = title;
+    titleEl.style.color = "var(--neon-cyan)";
+    msgEl.innerText = message;
+
+    cancelBtn.style.display = 'none';
+    okBtn.innerText = "확인";
+    okBtn.className = "btn btn-green";
+    okBtn.onclick = function() {
+        closeCustomDialog();
+    };
+
+    modal.style.display = 'flex';
+}
+
+// 2) 선택 확인창 (기존 confirm 대체)
+function showAppConfirm(message, onConfirm, title = "⚠️ 작업 확인", okText = "삭제 실행", isDanger = true) {
+    const modal = document.getElementById('custom-dialog-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('cd-title');
+    const msgEl = document.getElementById('cd-message');
+    const cancelBtn = document.getElementById('cd-cancel-btn');
+    const okBtn = document.getElementById('cd-ok-btn');
+
+    titleEl.innerText = title;
+    titleEl.style.color = isDanger ? "#ff5252" : "var(--neon-cyan)";
+    msgEl.innerText = message;
+
+    cancelBtn.style.display = 'inline-block';
+    okBtn.innerText = okText;
+    okBtn.className = isDanger ? "btn btn-red" : "btn btn-green";
+
+    customDialogCallback = onConfirm;
+    okBtn.onclick = function() {
+        const cb = customDialogCallback;
+        closeCustomDialog();
+        if (typeof cb === 'function') cb();
+    };
+
+    modal.style.display = 'flex';
+}
+
 // ★ 번호 표시 변환 함수: 평소엔 '4786'만 표시, 뒷자리가 겹치는 가족/공범 번호가 있으면 '3950-4786' 자동 표시!
 function formatPhoneDisplay(phoneKey) {
     if (!phoneKey || phoneKey === "번호미상") return "번호미상";
@@ -42,10 +105,7 @@ function formatPhoneDisplay(phoneKey) {
     const parts = cleanKey.split('-');
     const last4 = parts[parts.length - 1];
 
-    // 현재 추적 중인 전체 번호 목록에서 동일한 뒷자리(4자리)가 2개 이상 있는지 검사
     const sameLast4Count = phoneOrder.filter(p => p.replace(/^#/, '').endsWith(last4)).length;
-
-    // 뒷자리가 겹치면 '3950-4786' 전체 표시, 안 겹치면 깔끔하게 '4786'만 표시
     return (sameLast4Count > 1 && parts.length > 1) ? cleanKey : last4;
 }
 
@@ -201,7 +261,7 @@ window.switchInfoModalTab = function(tabName) {
 window.copyReportEmail = function() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(REPORT_EMAIL).then(() => {
-            alert(`제보 이메일 주소(${REPORT_EMAIL})가 복사되었습니다!`);
+            showAppAlert(`제보 이메일 주소(${REPORT_EMAIL})가 클립보드에 복사되었습니다.`, "📋 이메일 복사 완료");
         }).catch(() => fallbackCopyEmail());
     } else {
         fallbackCopyEmail();
@@ -214,7 +274,7 @@ function fallbackCopyEmail() {
     temp.select();
     document.execCommand('copy');
     document.body.removeChild(temp);
-    alert(`제보 이메일 주소(${REPORT_EMAIL})가 복사되었습니다!`);
+    showAppAlert(`제보 이메일 주소(${REPORT_EMAIL})가 클립보드에 복사되었습니다.`, "📋 이메일 복사 완료");
 }
 window.sendFeedbackMail = function() {
     const type = document.getElementById('fb-type').value;
@@ -224,10 +284,10 @@ window.sendFeedbackMail = function() {
     window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(content)}`;
 };
 
-// ===== 선택형 초기화 모달 및 2중 확인창 =====
+// ===== 선택형 초기화 모달 및 커스텀 2중 확인창 =====
 window.openResetModal = function() {
     if (phoneOrder.length === 0) {
-        alert("현재 초기화할 추적 데이터가 없습니다.");
+        showAppAlert("현재 초기화할 추적 데이터가 없습니다.", "🗑️ 데이터 없음");
         return;
     }
     renderResetModalList();
@@ -257,83 +317,91 @@ function renderResetModalList() {
 
 window.confirmAndClearSinglePhone = function(phoneKey) {
     const displayPhone = formatPhoneDisplay(phoneKey);
-    const ok = confirm(`정말 [📱 ${displayPhone}] 대상자의 추적 동선과 기록을 삭제하시겠습니까?\n(다른 전화번호의 기록은 그대로 유지됩니다.)`);
-    if (!ok) return;
+    showAppConfirm(
+        `정말 [📱 ${displayPhone}] 대상자의 추적 동선과 기록을 삭제하시겠습니까?\n(다른 전화번호의 기록은 그대로 유지됩니다.)`,
+        function() {
+            const g = phoneGroups[phoneKey];
+            if (!g) return;
 
-    const g = phoneGroups[phoneKey];
-    if (!g) return;
+            if (g.polyline) g.polyline.setMap(null);
+            g.stations.forEach(st => {
+                if (st.circle) st.circle.setMap(null);
+                if (st.overlay) st.overlay.setMap(null);
+                delete allStationsMap[st.stationUid];
+            });
 
-    if (g.polyline) g.polyline.setMap(null);
-    g.stations.forEach(st => {
-        if (st.circle) st.circle.setMap(null);
-        if (st.overlay) st.overlay.setMap(null);
-        delete allStationsMap[st.stationUid];
-    });
+            const cards = document.querySelectorAll('#target-list .target-card');
+            cards.forEach(card => {
+                if (card.getAttribute('data-phone') === phoneKey) {
+                    card.remove();
+                }
+            });
 
-    const cards = document.querySelectorAll('#target-list .target-card');
-    cards.forEach(card => {
-        if (card.getAttribute('data-phone') === phoneKey) {
-            card.remove();
-        }
-    });
+            delete phoneGroups[phoneKey];
+            phoneOrder = phoneOrder.filter(p => p !== phoneKey);
 
-    delete phoneGroups[phoneKey];
-    phoneOrder = phoneOrder.filter(p => p !== phoneKey);
+            savedSignalsHistory = savedSignalsHistory.filter(item => item.phone !== phoneKey);
+            saveHistoryToStorage();
 
-    // ★ 자동 백업 저장소에서도 해당 전화번호 기록만 제거
-    savedSignalsHistory = savedSignalsHistory.filter(item => item.phone !== phoneKey);
-    saveHistoryToStorage();
+            sysLog(`[선택 초기화] 📱 ${displayPhone} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
 
-    sysLog(`[선택 초기화] 📱 ${displayPhone} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
+            if (phoneOrder.length === 0) {
+                resetDashboardToEmpty();
+                closeResetModal();
+                return;
+            }
 
-    if (phoneOrder.length === 0) {
-        resetDashboardToEmpty();
-        closeResetModal();
-        return;
-    }
+            if (selectedPhoneFilter === phoneKey) {
+                selectedPhoneFilter = 'ALL';
+            }
+            if (lastActiveGroup && lastActiveGroup.phone === phoneKey) {
+                lastActiveGroup = phoneGroups[phoneOrder[phoneOrder.length - 1]];
+            }
 
-    if (selectedPhoneFilter === phoneKey) {
-        selectedPhoneFilter = 'ALL';
-    }
-    if (lastActiveGroup && lastActiveGroup.phone === phoneKey) {
-        lastActiveGroup = phoneGroups[phoneOrder[phoneOrder.length - 1]];
-    }
-
-    refreshAllPhoneLabelsOnUI();
-    renderPhoneFilterBar();
-    filterLogCardsByPhone();
-    refreshTopDashboard();
-    renderResetModalList();
+            refreshAllPhoneLabelsOnUI();
+            renderPhoneFilterBar();
+            filterLogCardsByPhone();
+            refreshTopDashboard();
+            renderResetModalList();
+        },
+        "🗑️ 개별 대상자 삭제 확인",
+        "선택 삭제",
+        true
+    );
 };
 
 window.confirmAndClearAll = function() {
-    const ok = confirm(`정말 모든 전화번호(${phoneOrder.length}명)의 위치추적 데이터를 전체 초기화하시겠습니까?\n삭제된 이동 경로와 체류 기록은 복구할 수 없습니다.`);
-    if (!ok) return;
+    showAppConfirm(
+        `정말 모든 전화번호(${phoneOrder.length}명)의 위치추적 데이터를 전체 초기화하시겠습니까?\n삭제된 이동 경로와 체류 기록은 복구할 수 없습니다.`,
+        function() {
+            phoneOrder.forEach(phone => {
+                const g = phoneGroups[phone];
+                if (g.polyline) g.polyline.setMap(null);
+                g.stations.forEach(st => {
+                    if (st.circle) st.circle.setMap(null);
+                    if (st.overlay) st.overlay.setMap(null);
+                });
+            });
 
-    phoneOrder.forEach(phone => {
-        const g = phoneGroups[phone];
-        if (g.polyline) g.polyline.setMap(null);
-        g.stations.forEach(st => {
-            if (st.circle) st.circle.setMap(null);
-            if (st.overlay) st.overlay.setMap(null);
-        });
-    });
+            phoneGroups = {};
+            phoneOrder = [];
+            selectedPhoneFilter = 'ALL';
+            allStationsMap = {};
+            stationUidCounter = 0;
+            logSeqCounter = 0;
+            lastActiveGroup = null;
 
-    phoneGroups = {};
-    phoneOrder = [];
-    selectedPhoneFilter = 'ALL';
-    allStationsMap = {};
-    stationUidCounter = 0;
-    logSeqCounter = 0;
-    lastActiveGroup = null;
+            savedSignalsHistory = [];
+            try { localStorage.removeItem(STORAGE_KEY_SIGNALS); } catch (e) {}
 
-    // ★ 자동 백업 저장소 전체 비우기
-    savedSignalsHistory = [];
-    try { localStorage.removeItem(STORAGE_KEY_SIGNALS); } catch (e) {}
-
-    resetDashboardToEmpty();
-    closeResetModal();
-    sysLog("모든 추적 데이터가 전체 초기화되었습니다.", "#ffab00");
+            resetDashboardToEmpty();
+            closeResetModal();
+            sysLog("모든 추적 데이터가 전체 초기화되었습니다.", "#ffab00");
+        },
+        "🚨 전체 데이터 초기화 경고",
+        "전체 초기화",
+        true
+    );
 };
 
 function resetDashboardToEmpty() {
@@ -371,7 +439,6 @@ function loadKakaoMapSdk(appKey) {
 
             sysLog(`카카오맵 연결 완료 (${APP_VERSION}). SKT·KT·LGU+ 실시간 문자 수신 대기중.`, "#00e676");
 
-            // ★ 지도가 준비되자마자 이전에 저장되어 있던 추적 기록을 즉시 복원합니다!
             restoreHistoryFromStorage();
         });
     };
@@ -493,7 +560,7 @@ function syncMapLayersVisibility() {
 window.receiveSmsFromAndroid = function(rawText) {
     if (!rawText || !rawText.trim()) return;
     if (!kakaoMap) {
-        alert("지도가 아직 로드되지 않았습니다.");
+        showAppAlert("지도가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "⏳ 지도 로딩 중");
         return;
     }
     sysLog(`문자 수신: "${rawText}"`, "#00e5ff");
@@ -568,7 +635,6 @@ function getOrCreatePhoneGroup(phone) {
         };
         phoneOrder.push(phone);
 
-        // ★ 새 번호가 추가되었을 때 기존 번호와 뒷자리가 겹치면 기존 라벨도 '3950-4786' 형태로 즉시 업데이트!
         refreshAllPhoneLabelsOnUI();
     }
     return phoneGroups[phone];
@@ -577,7 +643,6 @@ function getOrCreatePhoneGroup(phone) {
 function processLocationSignal(lat, lng, parsed) {
     const { phone, address, pci, dateObj: eventDate, timeStr, isOffline } = parsed;
 
-    // ★ 신호를 처리할 때마다 로컬 백업 배열에 추가하고 저장
     savedSignalsHistory.push({
         lat: lat,
         lng: lng,
@@ -768,7 +833,6 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
-    // ★ 지도가 축소됐을 때 뜨는 미니 배지(node-mini-badge)에 'PCI 값' 표시!
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
     const miniPciText = st.pci !== '미상' ? `PCI:${st.pci}` : `#${st.seq}`;
@@ -1114,7 +1178,6 @@ function playTacticalBeep(isOffline) {
     let startX = 0, startY = 0, startTime = 0;
 
     document.addEventListener('pointerdown', function(e) {
-        // 지도 영역(#map) 내부를 터치했을 때만 시작 위치 기록
         if (!e.target.closest('#map')) return;
         startX = e.clientX;
         startY = e.clientY;
@@ -1129,12 +1192,9 @@ function playTacticalBeep(isOffline) {
         const elapsed = Date.now() - startTime;
         startTime = 0;
 
-        // 손가락 이동거리가 10px 미만이고 0.4초 이내로 톡 눌렀을 때만 '클릭(Tap)'으로 인정!
-        // (손가락으로 잡고 끄는 드래그 동작일 때는 무시하고 지도만 부드럽게 움직임)
         if (moveX < 10 && moveY < 10 && elapsed < 400) {
             const nodes = document.querySelectorAll('.tactical-node');
             for (const node of nodes) {
-                // 화면에 보이는 기지국 점(.node-core)과 라벨(.node-label, .node-mini-badge) 영역 확인
                 const targets = [
                     node.querySelector('.node-core'),
                     node.querySelector('.node-label'),
@@ -1146,12 +1206,11 @@ function playTacticalBeep(isOffline) {
                     const rect = el.getBoundingClientRect();
                     if (rect.width === 0 || rect.height === 0) continue;
 
-                    // 터치한 좌표가 동그란 점이나 글자 라벨 박스 안쪽(여유 반경 6px 포함)이면 즉시 팝업 실행!
                     if (
                         e.clientX >= rect.left - 6 && e.clientX <= rect.right + 6 &&
                         e.clientY >= rect.top - 6 && e.clientY <= rect.bottom + 6
                     ) {
-                        node.click(); // 해당 기지국의 openHistoryModal() 실행
+                        node.click();
                         return;
                     }
                 }

@@ -9,7 +9,7 @@
 </head>
 <body>
 
-    <!-- 1. 상단 헤더 (3줄 콤팩트 배치로 작은 폰 화면에서도 우측 버튼과 겹침 방지) -->
+    <!-- 1. 상단 헤더 (3줄 콤팩트 배치) -->
     <header>
         <div class="brand">
             <div class="radar-dot" id="header-dot"></div>
@@ -156,7 +156,7 @@
         </div>
     </div>
 
-    <!-- 모달 3: 전화번호 선택 초기화 및 2중 안전 확인 팝업 -->
+    <!-- 모달 3: 전화번호 선택 초기화 팝업 -->
     <div id="reset-modal" class="modal-overlay" onclick="if(event.target.id==='reset-modal') closeResetModal()">
         <div class="modal-card">
             <div class="modal-header">
@@ -170,6 +170,21 @@
 
             <div class="reset-phone-list" id="reset-phone-list-box"></div>
             <button class="btn-danger-full" onclick="confirmAndClearAll()">🚨 전체 번호 일괄 초기화</button>
+        </div>
+    </div>
+
+    <!-- ★ 모달 4: 앱 전용 커스텀 알림/확인 메시지박스 (웹 기본 alert/confirm 완전 대체) -->
+    <div id="custom-dialog-modal" class="modal-overlay" style="z-index: 9999;" onclick="if(event.target.id==='custom-dialog-modal') closeCustomDialog()">
+        <div class="modal-card" style="max-width: 340px;">
+            <div class="modal-header">
+                <span class="modal-title" id="cd-title" style="color:var(--neon-cyan);">🔔 아르고스 알림</span>
+                <button class="modal-close" onclick="closeCustomDialog()">닫기 ✕</button>
+            </div>
+            <div id="cd-message" style="font-size:12.5px; color:#e6f4ff; line-height:1.6; margin: 12px 0 18px 0; white-space:pre-line; word-break:keep-all;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="btn" id="cd-cancel-btn" onclick="closeCustomDialog()" style="padding:6px 14px;">취소</button>
+                <button class="btn btn-green" id="cd-ok-btn" style="padding:6px 16px;">확인</button>
+            </div>
         </div>
     </div>
 
