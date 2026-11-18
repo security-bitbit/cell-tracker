@@ -49,7 +49,7 @@
         </div>
     </div>
 
-    <!-- 2-1. 다중 전화번호(뒷 4자리) 필터 바 -->
+    <!-- 2-1. 다중 전화번호 필터 바 -->
     <div id="phone-filter-bar">
         <span style="font-size:11px; color:#8ab8cc; font-weight:bold; flex-shrink:0;">📱 추적 대상:</span>
         <div class="phone-chip selected" onclick="selectPhoneFilter('ALL')">
@@ -61,18 +61,19 @@
     <div id="map-container">
         <div id="map"></div>
 
-        <!-- 좌측 상단: 반경 & 이동동선 & 줌 축소 시 라벨 겹침 제어 스위치 -->
+        <!-- ★ 좌측 상단: 지도를 가리지 않는 가로 1줄 슬림 미니 칩으로 변경 -->
         <div class="map-layer-controls">
-            <button class="layer-toggle-btn" id="btn-toggle-radius" onclick="toggleRadiusLayer()">🔵 기지국 반경: 켜짐</button>
-            <button class="layer-toggle-btn" id="btn-toggle-route" onclick="toggleRouteLayer()">⚡ 이동동선: 켜짐</button>
-            <button class="layer-toggle-btn" id="btn-toggle-labels" onclick="cycleLabelMode()">🏷️ 경유지 라벨: 자동(축소시 숨김)</button>
+            <button class="layer-toggle-btn" id="btn-toggle-radius" onclick="toggleRadiusLayer()">🔵 반경 ON</button>
+            <button class="layer-toggle-btn" id="btn-toggle-route" onclick="toggleRouteLayer()">⚡ 동선 ON</button>
+            <button class="layer-toggle-btn" id="btn-toggle-labels" onclick="cycleLabelMode()">🏷️ 라벨:자동</button>
         </div>
 
-        <!-- 우측 하단 줌/포커스 버튼 -->
+        <!-- ★ 우측 하단 줌/타겟/내위치(GPS) 버튼 -->
         <div class="map-fab-group">
             <button class="fab-btn" onclick="zoomMap(-1)" title="확대">+</button>
             <button class="fab-btn" onclick="zoomMap(1)" title="축소">−</button>
-            <button class="fab-btn" onclick="focusLastTarget()" title="최근 위치로 이동">🎯</button>
+            <button class="fab-btn" id="btn-my-gps" onclick="toggleMyLocationGps()" title="내 위치(GPS) 표시 및 이동">🧭</button>
+            <button class="fab-btn" onclick="focusLastTarget()" title="최근 타겟 위치로 이동">🎯</button>
         </div>
 
         <!-- 지도 연결 안내 오버레이 -->
@@ -173,7 +174,7 @@
         </div>
     </div>
 
-    <!-- ★ 모달 4: 앱 전용 커스텀 알림/확인 메시지박스 (웹 기본 alert/confirm 완전 대체) -->
+    <!-- 모달 4: 앱 전용 커스텀 알림/확인 메시지박스 -->
     <div id="custom-dialog-modal" class="modal-overlay" style="z-index: 9999;" onclick="if(event.target.id==='custom-dialog-modal') closeCustomDialog()">
         <div class="modal-card" style="max-width: 340px;">
             <div class="modal-header">

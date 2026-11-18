@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 커스텀 모달 탑재] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 실시간 PCI 및 통신망(알뜰폰) 안내 탑재] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -19,6 +19,14 @@ let showRadius = true;
 let showRoute = true;
 let labelMode = 'AUTO';
 
+// ★ 내 위치(GPS) 및 내 폰이 현재 잡고 있는 실시간 기지국 PCI 상태 관리 변수
+let myGpsWatchId = null;
+let myGpsOverlay = null;
+let myGpsCircle = null;
+let myLastLatLng = null;
+let myCurrentPci = null;
+let myCurrentNetType = "";
+
 // ★ 앱을 껐다 켜도 기록이 유지되도록 로컬 스토리지에 보관할 키 이름과 배열
 const STORAGE_KEY_SIGNALS = 'CELL_TRACKER_SAVED_SIGNALS_V1';
 let savedSignalsHistory = [];
@@ -36,7 +44,80 @@ function sysLog(msg, color = '#00e676') {
 }
 
 // =====================================================================
-// ★ [아르고스 전용 커스텀 알림창 / 확인창 제어 함수] (웹 기본 팝업 대체)
+// ★ [안드로이드 네이티브 -> 웹] 현재 내 휴대폰이 잡고 있는 실시간 PCI 수신 브릿지
+// =====================================================================
+window.updateMyPhonePci = function(pciStr, netType) {
+    if (!pciStr) return;
+    const changed = (myCurrentPci !== pciStr || myCurrentNetType !== netType);
+    myCurrentPci = pciStr;
+    myCurrentNetType = netType || "";
+
+    if (changed) {
+        renderMyPciOnDashboard();
+        if (myGpsOverlay && myLastLatLng) {
+            myGpsOverlay.setContent(buildMyGpsMarkerHtml());
+        }
+    }
+};
+
+// ★ 상단 '최근 PCI' 카드를 터치했을 때 뜨는 통신사(알뜰폰 포함) PCI 비교 가이드 팝업
+window.showPciGuideAlert = function() {
+    const msg = 
+        "1. 동일 통신망끼리만 PCI 값이 같게 표시됩니다\n" +
+        "• SKT·KT·LGU+는 각자 고유의 기지국 안테나를 사용하므로, 같은 장소에 있어도 타겟(피의자)과 내 휴대폰의 통신망이 같아야 동일한 PCI 번호가 표시됩니다.\n\n" +
+        "2. 알뜰폰(별정통신사)은 모회사 통신망을 그대로 따릅니다\n" +
+        "• 알뜰폰은 자체 기지국이 없으므로 실제 빌려 쓰는 물리적 통신망과 100% 동일한 PCI 값을 가집니다.\n" +
+        "  - SKT 및 SKT망 알뜰폰 ➔ 동일 PCI 표시\n" +
+        "  - KT 및 KT망 알뜰폰 ➔ 동일 PCI 표시\n" +
+        "  - LGU+ 및 LGU+망 알뜰폰 ➔ 동일 PCI 표시\n\n" +
+        "💡 현장 팁: 추적 대상자의 통신망과 같은 통신사(또는 해당 망 알뜰폰)를 쓰는 수사관의 휴대폰에서 '내폰 PCI'를 비교하시면 가장 정확합니다.";
+
+    showAppAlert(msg, "📡 실시간 기지국 PCI 비교 안내");
+};
+
+// ★ 상단 상황판 3번째 칸('최근 PCI')에 [타겟 PCI]와 [내 폰 실시간 PCI]를 동시에 렌더링
+function renderMyPciOnDashboard() {
+    const pciValEl = document.getElementById('kpi-pci');
+    if (!pciValEl) return;
+
+    const targetGroup = (selectedPhoneFilter !== 'ALL' && phoneGroups[selectedPhoneFilter])
+        ? phoneGroups[selectedPhoneFilter]
+        : lastActiveGroup;
+
+    const targetPci = (targetGroup && targetGroup.currentStation) ? targetGroup.currentStation.pci : "-";
+
+    if (!myCurrentPci) {
+        pciValEl.innerText = targetPci !== "-" ? `PCI ${targetPci}` : "-";
+        return;
+    }
+
+    const isMatch = (targetPci !== "-" && targetPci !== "미상" && String(targetPci) === String(myCurrentPci));
+    const matchBadge = isMatch ? ` <span style="color:#00e676; font-weight:800;">(🎯일치!)</span>` : '';
+    const netLabel = myCurrentNetType ? `${myCurrentNetType}` : '';
+
+    pciValEl.innerHTML = `
+        <div style="line-height:1.15;">
+            <div>${targetPci !== "-" ? `타겟: ${targetPci}` : `타겟: -`}</div>
+            <div style="font-size:10.5px; color:${isMatch ? '#00e676' : '#ffd740'}; font-weight:700; margin-top:2px;">
+                📡내폰: ${myCurrentPci}${netLabel ? `(${netLabel})` : ''}${matchBadge}
+            </div>
+        </div>
+    `;
+}
+
+function buildMyGpsMarkerHtml() {
+    const pciTag = myCurrentPci ? ` [PCI:${myCurrentPci}]` : '';
+    return `
+        <div class="my-gps-node">
+            <div class="my-gps-pulse"></div>
+            <div class="my-gps-core"></div>
+            <div class="my-gps-label">내 위치${pciTag}</div>
+        </div>
+    `;
+}
+
+// =====================================================================
+// ★ [아르고스 전용 커스텀 알림창 / 확인창 제어 함수]
 // =====================================================================
 let customDialogCallback = null;
 
@@ -46,7 +127,6 @@ window.closeCustomDialog = function() {
     customDialogCallback = null;
 };
 
-// 1) 단순 알림창 (기존 alert 대체)
 function showAppAlert(message, title = "🔔 아르고스 알림") {
     const modal = document.getElementById('custom-dialog-modal');
     if (!modal) return;
@@ -70,7 +150,6 @@ function showAppAlert(message, title = "🔔 아르고스 알림") {
     modal.style.display = 'flex';
 }
 
-// 2) 선택 확인창 (기존 confirm 대체)
 function showAppConfirm(message, onConfirm, title = "⚠️ 작업 확인", okText = "삭제 실행", isDanger = true) {
     const modal = document.getElementById('custom-dialog-modal');
     if (!modal) return;
@@ -98,7 +177,122 @@ function showAppConfirm(message, onConfirm, title = "⚠️ 작업 확인", okTe
     modal.style.display = 'flex';
 }
 
-// ★ 번호 표시 변환 함수: 평소엔 '4786'만 표시, 뒷자리가 겹치는 가족/공범 번호가 있으면 '3950-4786' 자동 표시!
+// =====================================================================
+// ★ [실시간 내 위치(GPS) 표시 및 이동 기능]
+// =====================================================================
+window.toggleMyLocationGps = function() {
+    if (!kakaoMap) {
+        showAppAlert("지도가 아직 준비되지 않았습니다.", "⏳ 잠시만 기다려 주세요");
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        showAppAlert("현재 기기 또는 브라우저에서 GPS 위치 기능을 지원하지 않습니다.", "❌ GPS 미지원");
+        return;
+    }
+
+    const btn = document.getElementById('btn-my-gps');
+
+    if (myGpsWatchId !== null) {
+        if (myLastLatLng) {
+            kakaoMap.panTo(myLastLatLng);
+        }
+        showAppConfirm(
+            "현재 내 위치(GPS) 실시간 표시가 켜져 있습니다.\n지도에서 내 위치 표시를 끄시겠습니까?\n([취소]를 누르면 내 위치 표시가 계속 유지됩니다.)",
+            function() {
+                stopMyLocationGps();
+            },
+            "🧭 내 위치(GPS) 설정",
+            "GPS 끄기",
+            false
+        );
+        return;
+    }
+
+    btn.classList.add('gps-active');
+    sysLog("[내 위치 GPS] 현재 위치 위성 신호 수신 시작...", "#00e5ff");
+
+    let isFirstFix = true;
+
+    myGpsWatchId = navigator.geolocation.watchPosition(
+        function(pos) {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const accuracy = Math.min(Math.max(pos.coords.accuracy || 30, 15), 250);
+            const loc = new kakao.maps.LatLng(lat, lng);
+            myLastLatLng = loc;
+
+            if (!myGpsCircle) {
+                myGpsCircle = new kakao.maps.Circle({
+                    map: kakaoMap,
+                    center: loc,
+                    radius: accuracy,
+                    strokeWeight: 1,
+                    strokeColor: '#00e5ff',
+                    strokeOpacity: 0.6,
+                    strokeStyle: 'solid',
+                    fillColor: '#00e5ff',
+                    fillOpacity: 0.12
+                });
+            } else {
+                myGpsCircle.setPosition(loc);
+                myGpsCircle.setRadius(accuracy);
+                myGpsCircle.setMap(kakaoMap);
+            }
+
+            const markerHtml = buildMyGpsMarkerHtml();
+
+            if (!myGpsOverlay) {
+                myGpsOverlay = new kakao.maps.CustomOverlay({
+                    map: kakaoMap,
+                    position: loc,
+                    content: markerHtml,
+                    xAnchor: 0.5,
+                    yAnchor: 0.5,
+                    zIndex: 10
+                });
+            } else {
+                myGpsOverlay.setPosition(loc);
+                myGpsOverlay.setContent(markerHtml);
+                myGpsOverlay.setMap(kakaoMap);
+            }
+
+            if (isFirstFix) {
+                isFirstFix = false;
+                kakaoMap.panTo(loc);
+                const pciInfo = myCurrentPci ? `, 현재 내 폰 PCI: ${myCurrentPci}` : '';
+                sysLog(`[내 위치 확인 완료] 현재 위치로 지도를 이동했습니다. (오차 약 ${Math.round(pos.coords.accuracy || 20)}m${pciInfo})`, "#00e676");
+            }
+        },
+        function(err) {
+            stopMyLocationGps();
+            let errMsg = "위치 정보를 가져올 수 없습니다.\n스마트폰 상단바에서 [위치(GPS)]가 켜져 있는지, 앱의 위치 권한이 허용되어 있는지 확인해 주세요.";
+            if (err.code === 1) {
+                errMsg = "위치 권한이 거부되었습니다.\n스마트폰 [설정 > 애플리케이션 > 아르고스 > 권한]에서 [위치] 권한을 허용해 주세요.";
+            }
+            showAppAlert(errMsg, "🧭 GPS 수신 실패");
+            sysLog(`[내 위치 오류] GPS 수신 실패 (코드: ${err.code})`, "#ff1744");
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 5000,
+            timeout: 15000
+        }
+    );
+};
+
+function stopMyLocationGps() {
+    if (myGpsWatchId !== null) {
+        navigator.geolocation.clearWatch(myGpsWatchId);
+        myGpsWatchId = null;
+    }
+    if (myGpsOverlay) myGpsOverlay.setMap(null);
+    if (myGpsCircle) myGpsCircle.setMap(null);
+    const btn = document.getElementById('btn-my-gps');
+    if (btn) btn.classList.remove('gps-active');
+    sysLog("[내 위치 GPS] 실시간 내 위치 표시를 종료했습니다.", "#ffab00");
+}
+
 function formatPhoneDisplay(phoneKey) {
     if (!phoneKey || phoneKey === "번호미상") return "번호미상";
     const cleanKey = phoneKey.replace(/^#/, '');
@@ -109,7 +303,6 @@ function formatPhoneDisplay(phoneKey) {
     return (sameLast4Count > 1 && parts.length > 1) ? cleanKey : last4;
 }
 
-// ★ 새로운 번호가 추가/삭제되어 뒷자리 중복 여부가 바뀔 때 기존 마커와 로그 카드의 번호 표기를 즉시 갱신
 function refreshAllPhoneLabelsOnUI() {
     phoneOrder.forEach(p => {
         const g = phoneGroups[p];
@@ -132,7 +325,6 @@ function refreshAllPhoneLabelsOnUI() {
     });
 }
 
-// ★ 로컬 스토리지에 현재까지의 추적 신호 내역 저장
 function saveHistoryToStorage() {
     if (isRestoringHistory) return;
     try {
@@ -140,7 +332,6 @@ function saveHistoryToStorage() {
     } catch (e) {}
 }
 
-// ★ 지도 로드 완료 시 이전 추적 기록 자동 복원
 function restoreHistoryFromStorage() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY_SIGNALS);
@@ -175,6 +366,21 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('report-email-display').innerText = REPORT_EMAIL;
     renderChangelogList();
 
+    // ★ 상단 '최근 PCI' 카드에 자동으로 ⓘ 아이콘과 안내 팝업 클릭 이벤트를 연결!
+    const pciValEl = document.getElementById('kpi-pci');
+    if (pciValEl && pciValEl.parentElement) {
+        const pciCard = pciValEl.parentElement;
+        pciCard.style.cursor = 'pointer';
+        pciCard.onclick = window.showPciGuideAlert;
+        const labelEl = pciCard.querySelector('.kpi-label');
+        if (labelEl && !labelEl.innerHTML.includes('ⓘ')) {
+            labelEl.innerHTML = `최근 PCI <span style="color:var(--neon-cyan); font-weight:bold;">ⓘ</span>`;
+        }
+    }
+
+    // ★ 시작 로그 및 보안/통신망(알뜰폰) PCI 안내 문구 출력
+    sysLog(`💡 [PCI 비교 안내] 실시간 내폰 PCI는 별정통신사(알뜰폰) 여부와 무관하게 실제 사용하는 통신망(SKT망·KT망·LGU+망)이 타겟과 같을 때 동일한 PCI 값으로 표시됩니다. (상단 '최근 PCI ⓘ' 터치 시 상세안내)`, "#ffd740");
+    sysLog(`🔒 [보안 작동 중] 기지국 위치추적 외 개인 문자·카톡은 절대 수집/기록하지 않으며 모든 데이터는 기기 내부에만 보관됩니다.`, "#8ab8cc");
     sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
 
     try {
@@ -412,12 +618,12 @@ function resetDashboardToEmpty() {
     document.getElementById('kpi-status').style.color = "var(--neon-green)";
     document.getElementById('kpi-status-card').classList.remove('offline');
     document.getElementById('header-dot').classList.remove('offline');
-    document.getElementById('kpi-pci').innerText = "-";
+    renderMyPciOnDashboard();
     document.getElementById('kpi-dist').innerText = "0.00 km";
     document.getElementById('target-list').innerHTML = '<div style="color:#689fb8; text-align:center; padding-top:18px;">[초기화 완료] 모든 마커와 이동 경로가 삭제되었습니다.</div>';
 }
 
-// ===== 카카오맵 초기화 및 레이어 제어 =====
+// ===== 카카오맵 초기화 및 슬림 레이어 제어 =====
 function loadKakaoMapSdk(appKey) {
     const script = document.createElement('script');
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
@@ -434,12 +640,17 @@ function loadKakaoMapSdk(appKey) {
             kakaoPlaces = new kakao.maps.services.Places();
 
             kakao.maps.event.addListener(kakaoMap, 'zoom_changed', function() {
+                const smsInput = document.getElementById('sms-input');
+                if (smsInput && document.activeElement === smsInput) {
+                    smsInput.blur();
+                }
                 applyLabelVisibilityRule();
             });
 
             sysLog(`카카오맵 연결 완료 (${APP_VERSION}). SKT·KT·LGU+ 실시간 문자 수신 대기중.`, "#00e676");
 
             restoreHistoryFromStorage();
+            renderMyPciOnDashboard();
         });
     };
 
@@ -479,15 +690,15 @@ window.cycleLabelMode = function() {
     const btn = document.getElementById('btn-toggle-labels');
     if (labelMode === 'AUTO') {
         labelMode = 'ALWAYS';
-        btn.innerText = "🏷️ 경유지 라벨: 항상 켜짐";
+        btn.innerText = "🏷️ 라벨:항상";
         btn.classList.remove('off');
     } else if (labelMode === 'ALWAYS') {
         labelMode = 'HIDE_PAST';
-        btn.innerText = "🏷️ 경유지 라벨: 숨김(PCI만)";
+        btn.innerText = "🏷️ 라벨:PCI만";
         btn.classList.add('off');
     } else {
         labelMode = 'AUTO';
-        btn.innerText = "🏷️ 경유지 라벨: 자동(축소시 숨김)";
+        btn.innerText = "🏷️ 라벨:자동";
         btn.classList.remove('off');
     }
     applyLabelVisibilityRule();
@@ -518,10 +729,10 @@ window.toggleRadiusLayer = function() {
     showRadius = !showRadius;
     const btn = document.getElementById('btn-toggle-radius');
     if (showRadius) {
-        btn.innerText = "🔵 기지국 반경: 켜짐";
+        btn.innerText = "🔵 반경 ON";
         btn.classList.remove('off');
     } else {
-        btn.innerText = "⚪ 기지국 반경: 꺼짐";
+        btn.innerText = "⚪ 반경 OFF";
         btn.classList.add('off');
     }
     syncMapLayersVisibility();
@@ -531,10 +742,10 @@ window.toggleRouteLayer = function() {
     showRoute = !showRoute;
     const btn = document.getElementById('btn-toggle-route');
     if (showRoute) {
-        btn.innerText = "⚡ 이동동선: 켜짐";
+        btn.innerText = "⚡ 동선 ON";
         btn.classList.remove('off');
     } else {
-        btn.innerText = "⚪ 이동동선: 꺼짐";
+        btn.innerText = "⚪ 동선 OFF";
         btn.classList.add('off');
     }
     syncMapLayersVisibility();
@@ -556,19 +767,43 @@ function syncMapLayersVisibility() {
     });
 }
 
-// ===== 안드로이드 수신 브릿지 및 지오코딩 =====
-window.receiveSmsFromAndroid = function(rawText) {
+// ===== 안드로이드 수신 브릿지 및 사생활 보호 마스킹 디버거 =====
+function maskSmsForDebug(raw) {
+    let masked = raw.replace(/\d/g, '#');
+    masked = masked.replace(/[가-힣]+/g, function(word) {
+        if (/^(Web발신|위치확인|전원꺼짐|전원|꺼짐|켜짐|정상|착신전환|통화불가|기지국|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|특별자치시|특별자치도|광역시)$/.test(word)) {
+            return word;
+        }
+        if (/(시|도|군|구|읍|면|동|리|로|길|가|번지)$/.test(word)) {
+            return word;
+        }
+        return '*'.repeat(word.length);
+    });
+    return masked;
+}
+
+window.receiveSmsFromAndroid = function(rawText, isManualInput = false) {
     if (!rawText || !rawText.trim()) return;
     if (!kakaoMap) {
         showAppAlert("지도가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "⏳ 지도 로딩 중");
         return;
     }
-    sysLog(`문자 수신: "${rawText}"`, "#00e5ff");
+
     const parsed = parseSmsContent(rawText);
+
     if (!parsed.address) {
-        sysLog("오류: 문자에서 유효한 주소를 추출하지 못했습니다.", "#ff1744");
+        const hasCellHint = /(PCI|CPI|기지국|위치확인|\[\s*\d{1,4}\s*\])/i.test(rawText);
+
+        if (isManualInput || hasCellHint) {
+            const debugPattern = maskSmsForDebug(rawText);
+            sysLog(`⚠️ [양식 미인식 디버그] 주소 추출 실패 | 양식구조: "${debugPattern}" (개인정보 자동보호됨)`, "#ff1744");
+        }
         return;
     }
+
+    const dispPhone = formatPhoneDisplay(parsed.phone);
+    sysLog(`📡 [기지국 신호 포착] 📱${dispPhone} | PCI:${parsed.pci} | ${parsed.address}`, "#00e5ff");
+
     geocodeOnKakao(parsed);
 };
 
@@ -968,6 +1203,8 @@ window.closeHistoryModal = function() {
 };
 
 function refreshTopDashboard() {
+    renderMyPciOnDashboard();
+
     const targetGroup = (selectedPhoneFilter !== 'ALL' && phoneGroups[selectedPhoneFilter])
         ? phoneGroups[selectedPhoneFilter]
         : lastActiveGroup;
@@ -985,8 +1222,6 @@ function refreshTopDashboard() {
         document.getElementById('kpi-count-label').innerText = `📱 ${disp}`;
         document.getElementById('kpi-count').innerText = `${targetGroup.stations.length} 개소`;
     }
-
-    document.getElementById('kpi-pci').innerText = `PCI ${st.pci}`;
 
     const statusEl = document.getElementById('kpi-status');
     const statusCard = document.getElementById('kpi-status-card');
@@ -1135,8 +1370,9 @@ function calcDistKm(lat1, lon1, lat2, lon2) {
 window.handleManualSms = function() {
     const input = document.getElementById('sms-input');
     if (!input.value.trim()) return;
-    window.receiveSmsFromAndroid(input.value);
+    window.receiveSmsFromAndroid(input.value, true);
     input.value = '';
+    input.blur();
 };
 
 window.toggleSound = function() {
@@ -1172,12 +1408,23 @@ function playTacticalBeep(isOffline) {
 }
 
 // =====================================================================
-// ★ [스마트 터치 판별기] 라벨 위를 끌면 지도 이동, 제자리 톡 누르면 상세정보 팝업!
+// ★ [스마트 터치 판별기 & 키보드 가림/포커스 버그 원천 차단 모듈]
 // =====================================================================
-(function initSmartMarkerTap() {
+(function initSmartMarkerTapAndKeyboardFix() {
     let startX = 0, startY = 0, startTime = 0;
 
+    function releaseInputFocusIfOutside(e) {
+        const smsInput = document.getElementById('sms-input');
+        if (!smsInput) return;
+        if (document.activeElement === smsInput && !e.target.closest('.toolbar')) {
+            smsInput.blur();
+        }
+    }
+
+    document.addEventListener('touchstart', releaseInputFocusIfOutside, { capture: true, passive: true });
     document.addEventListener('pointerdown', function(e) {
+        releaseInputFocusIfOutside(e);
+
         if (!e.target.closest('#map')) return;
         startX = e.clientX;
         startY = e.clientY;
@@ -1217,4 +1464,121 @@ function playTacticalBeep(isOffline) {
             }
         }
     }, true);
+
+    window.addEventListener('DOMContentLoaded', function() {
+        const smsInput = document.getElementById('sms-input');
+        const bottomPanel = document.getElementById('bottom-panel');
+
+        if (smsInput && bottomPanel) {
+            smsInput.addEventListener('focus', function() {
+                if (bottomPanel.classList.contains('collapsed')) {
+                    window.toggleBottomSheet();
+                }
+                setTimeout(function() {
+                    smsInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 250);
+            });
+        }
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', function() {
+                document.body.style.height = window.visualViewport.height + 'px';
+                if (kakaoMap) kakaoMap.relayout();
+            });
+        }
+    });
+})();
+// =====================================================================
+// ★ [익명 사용자 수 집계 & 제작자 전용 숨김 통계 팝업 모듈 - 3초 롱프레스 적용]
+// =====================================================================
+(function initArgusAnonymousStats() {
+    const NAMESPACE = 'argus_police_tracker_hsw';
+    const FIRST_VISIT_KEY = 'ARGUS_DEVICE_REGISTERED_V1';
+
+    window.addEventListener('DOMContentLoaded', function() {
+        // 1. 전체 누적 실행 횟수 +1
+        fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches/up`).catch(() => {});
+
+        // 2. 최초 실행 기기인 경우에만 순수 사용자 수 +1
+        try {
+            if (!localStorage.getItem(FIRST_VISIT_KEY)) {
+                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users/up`)
+                    .then(res => {
+                        if (res.ok) localStorage.setItem(FIRST_VISIT_KEY, 'true');
+                    })
+                    .catch(() => {});
+            }
+        } catch (e) {}
+
+        // 3. 상단 버전 배지(#header-ver-badge)를 정확히 3초(3000ms)간 꾹 눌러야 통계 팝업 오픈!
+        const verBadge = document.getElementById('header-ver-badge');
+        if (!verBadge) return;
+
+        // 모바일에서 3초간 누를 때 글자 선택이나 복사 메뉴가 뜨지 않도록 방지
+        verBadge.style.userSelect = 'none';
+        verBadge.style.webkitUserSelect = 'none';
+        verBadge.addEventListener('contextmenu', e => e.preventDefault());
+
+        let pressTimer = null;
+        let isLongPressTriggered = false;
+
+        const startPress = function() {
+            isLongPressTriggered = false;
+            if (pressTimer) clearTimeout(pressTimer);
+            pressTimer = setTimeout(function() {
+                isLongPressTriggered = true;
+                openCreatorStatsModal();
+            }, 3000); // ★ 3초(3000ms) 동안 떼지 않고 꾹 눌러야 작동
+        };
+
+        const cancelPress = function() {
+            if (pressTimer) {
+                clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        };
+
+        // 3초 롱프레스가 발동된 직후 손가락을 뗄 때, 기본 클릭(업데이트 내역 모달)이 실행되어 창이 덮이는 현상 차단
+        verBadge.addEventListener('click', function(e) {
+            if (isLongPressTriggered) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                isLongPressTriggered = false;
+            }
+        }, true);
+
+        verBadge.addEventListener('touchstart', startPress, { passive: true });
+        verBadge.addEventListener('touchend', cancelPress);
+        verBadge.addEventListener('touchmove', cancelPress);
+        verBadge.addEventListener('touchcancel', cancelPress);
+        verBadge.addEventListener('mousedown', startPress);
+        verBadge.addEventListener('mouseup', cancelPress);
+        verBadge.addEventListener('mouseleave', cancelPress);
+    });
+
+    async function openCreatorStatsModal() {
+        showAppAlert("📊 실시간 사용 통계를 불러오는 중입니다...", "🔐 제작자 전용 통계 (Admin)");
+        try {
+            const [userRes, launchRes] = await Promise.all([
+                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users`),
+                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches`)
+            ]);
+
+            const userData = userRes.ok ? await userRes.json() : { count: 0 };
+            const launchData = launchRes.ok ? await launchRes.json() : { count: 0 };
+
+            const users = userData.count || 1;
+            const launches = launchData.count || 1;
+
+            const statsMsg =
+                `현재 전국에서 아르고스(ARGUS)를 사용 중인 현황입니다.\n\n` +
+                `👮 누적 사용 인원(기기): 총 ${users.toLocaleString()} 명\n` +
+                `🚀 누적 시스템 가동 횟수: 총 ${launches.toLocaleString()} 회\n\n` +
+                `※ 본 통계는 개인정보 없이 기기별 최초 1회 익명 카운트로만 집계됩니다.`;
+
+            showAppAlert(statsMsg, "🔐 아르고스(ARGUS) 배포 현황");
+        } catch (err) {
+            showAppAlert("통계 서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.", "⚠️ 조회 실패");
+        }
+    }
 })();
