@@ -2,696 +2,476 @@
 <html lang="ko" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>ARGUS (아르고스) - 경찰 기지국 위치추적 시스템 공식 안내</title>
-    <!-- Tailwind CSS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ARGUS (아르고스) - 경찰 기지국 위치추적 시스템</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Pretendard 폰트 -->
-    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
     <style>
-        :root {
-            --bg-deep: #06111a;
-            --bg-panel: #071018;
-            --bg-card: #0a1926;
-            --neon-cyan: #00e5ff;
-            --neon-green: #00e676;
-            --neon-amber: #ffab00;
-            --neon-red: #ff5252;
-        }
-
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
-
         body {
-            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: var(--bg-deep);
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            background-color: #06111a;
             color: #e6f4ff;
             overflow-x: hidden;
-            word-break: keep-all;
-            overflow-wrap: break-word;
         }
-
-        /* 2D 배경 그리드 */
-        .tactical-bg {
-            background-color: var(--bg-deep);
-            background-image: 
-                linear-gradient(to right, rgba(0, 229, 255, 0.04) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(0, 229, 255, 0.04) 1px, transparent 1px);
+        .bg-grid-pattern {
             background-size: 28px 28px;
+            background-image: 
+                linear-gradient(to right, rgba(0, 229, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 229, 255, 0.05) 1px, transparent 1px);
         }
-
-        /* 다크 네온 카드 공통 스타일 */
-        .argus-card {
-            background: rgba(10, 25, 38, 0.88);
-            border: 1px solid rgba(0, 229, 255, 0.22);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        .neon-card {
+            background: rgba(10, 25, 38, 0.85);
+            border: 1px solid rgba(0, 229, 255, 0.2);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
         }
-
-        /* 시뮬레이터 파동 애니메이션 (정중앙 고정 상태에서 확산) */
         @keyframes pulseRing {
             0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.9; }
             100% { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
         }
-
-        .pulse-ring {
+        .sim-ripple {
             position: absolute;
             left: 50%;
             top: 50%;
-            transform: translate(-50%, -50%);
-            animation: pulseRing 2.2s infinite ease-out;
+            width: 24px;
+            height: 24px;
+            border-radius: 9999px;
+            border: 2px solid #00e676;
+            animation: pulseRing 2s infinite ease-out;
+            pointer-events: none;
         }
-
-        .pulse-ring-delay {
+        @keyframes gpsPulse {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.85; }
+            100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+        }
+        .gps-ripple {
             position: absolute;
             left: 50%;
             top: 50%;
-            transform: translate(-50%, -50%);
-            animation: pulseRing 2.2s infinite ease-out 1.1s;
+            width: 12px;
+            height: 12px;
+            border-radius: 9999px;
+            background: rgba(0, 229, 255, 0.45);
+            animation: gpsPulse 2s infinite ease-out;
+            pointer-events: none;
         }
     </style>
 </head>
-<body class="tactical-bg min-h-screen flex flex-col justify-between">
+<body class="bg-grid-pattern antialiased selection:bg-cyan-500 selection:text-slate-950">
 
-    <!-- 1. 상단 고정 컴팩트 헤더 (업로드된 참수리 아이콘 적용 및 버전 표기 제거) -->
-    <header class="sticky top-0 z-50 bg-[#06111a]/95 backdrop-blur-md border-b border-cyan-500/25">
-        <div class="max-w-5xl mx-auto px-3.5 sm:px-6 h-14 flex items-center justify-between gap-2">
-            <!-- 좌측 브랜드 -->
-            <a href="#" class="flex items-center gap-2.5 min-w-0">
-                <div class="relative w-10 h-10 rounded-xl bg-[#071521] border border-amber-400/60 flex items-center justify-center shrink-0 overflow-hidden shadow-[0_0_12px_rgba(255,215,64,0.25)]">
-                    <!-- 로컬 이미지 로드 전/실패 시에도 동일한 참수리+레이더 그래픽이 보이도록 정밀 SVG 배경 내장 -->
-                    <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" fill="none">
-                        <rect width="100" height="100" fill="#06111a"/>
-                        <circle cx="50" cy="50" r="42" stroke="#00e5ff" stroke-opacity="0.3" stroke-width="1.5"/>
-                        <circle cx="50" cy="50" r="30" stroke="#00e5ff" stroke-opacity="0.5" stroke-width="1.2"/>
-                        <line x1="8" y1="50" x2="92" y2="50" stroke="#00e5ff" stroke-opacity="0.25" stroke-width="1"/>
-                        <line x1="50" y1="8" x2="50" y2="92" stroke="#00e5ff" stroke-opacity="0.25" stroke-width="1"/>
-                        <path d="M18 40 C30 48, 38 48, 50 42 C62 48, 70 48, 82 40 C75 54, 63 58, 50 56 C37 58, 25 54, 18 40 Z" stroke="#ffd740" stroke-width="2.5" fill="rgba(255,215,64,0.15)"/>
-                        <circle cx="50" cy="64" r="11" stroke="#ffd740" stroke-width="2.5" fill="rgba(255,215,64,0.15)"/>
-                        <path d="M72 18 C67 18, 63 22, 63 27 C63 34, 72 42, 72 42 C72 42, 81 34, 81 27 C81 22, 77 18, 72 18 Z" fill="#ffd740"/>
-                        <circle cx="72" cy="27" r="3" fill="#06111a"/>
-                    </svg>
-                    <img src="Gemini_Generated_Image_ayo7j1ayo7j1ayo7.jpg" alt="아르고스 아이콘" class="relative z-10 w-full h-full object-cover rounded-xl" onerror="this.style.display='none'" />
-                </div>
-                <div class="leading-tight truncate">
+    <!-- 1. 상단 고정 내비게이션 바 -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-[#06111a]/90 border-b border-cyan-500/20">
+        <div class="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+                <!-- ★ 1번 아이콘 위치: ./logo.png 적용 -->
+                <img src="./logo.png" onerror="this.onerror=null; this.src='./logo.jpg';" alt="ARGUS 로고" class="w-9 h-9 rounded-xl object-cover border border-cyan-400/50 shadow-[0_0_12px_rgba(0,229,255,0.35)] shrink-0">
+                <div class="leading-tight">
                     <div class="flex items-center gap-1.5">
-                        <span class="font-black text-base text-white tracking-tight">아르고스 (ARGUS)</span>
+                        <span class="font-extrabold text-base tracking-tight text-white">아르고스</span>
+                        <span class="text-[11px] font-bold text-cyan-400">ARGUS</span>
                     </div>
-                    <div class="text-[11px] text-[#00e5ff] font-semibold truncate">경찰 기지국 위치추적 시스템</div>
+                    <span class="text-[10px] text-slate-400 block">경찰 기지국 위치추적 시스템</span>
                 </div>
-            </a>
-
-            <!-- 우측 APK 설치 전용 버튼 -->
-            <div class="flex items-center gap-1.5 shrink-0">
-                <a href="./ARGUS.apk" download class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-[#00e676] text-slate-950 shadow-[0_0_12px_rgba(0,230,118,0.35)] hover:brightness-110 transition">
-                    📥 APK 다운로드
+            </div>
+            <div class="flex items-center">
+                <a href="#install-guide" class="px-3.5 py-1.5 rounded-lg text-xs font-extrabold bg-emerald-400 text-slate-950 hover:bg-emerald-300 transition shadow-[0_0_12px_rgba(0,230,118,0.35)]">
+                    📥 APK 앱 설치
                 </a>
             </div>
         </div>
     </header>
 
-    <!-- 2. 히어로 섹션 (상단 대표 아이콘 배치, '동료 경찰관분들의' 문구 및 3대 핵심 기능 배지 적용) -->
-    <section class="pt-8 pb-10 sm:pt-12 sm:pb-14 px-4">
-        <div class="max-w-4xl mx-auto text-center space-y-5">
+    <main class="max-w-xl mx-auto px-4 pt-7 pb-20 space-y-12">
 
-            <!-- ★ 제작자 배지 위 대표 앱 아이콘 (둥근 사각형 프레임) -->
-            <div class="flex justify-center">
-                <div class="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-[#071521] border-2 border-amber-400/70 shadow-[0_0_28px_rgba(255,215,64,0.28)] overflow-hidden flex items-center justify-center">
-                    <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" fill="none">
-                        <rect width="100" height="100" fill="#06111a"/>
-                        <circle cx="50" cy="50" r="43" stroke="#00e5ff" stroke-opacity="0.35" stroke-width="1.2"/>
-                        <circle cx="50" cy="50" r="32" stroke="#00e5ff" stroke-opacity="0.65" stroke-width="1.5"/>
-                        <circle cx="50" cy="50" r="20" stroke="#00e5ff" stroke-opacity="0.3" stroke-width="1"/>
-                        <line x1="7" y1="50" x2="93" y2="50" stroke="#00e5ff" stroke-opacity="0.3" stroke-width="1"/>
-                        <line x1="50" y1="7" x2="50" y2="93" stroke="#00e5ff" stroke-opacity="0.3" stroke-width="1"/>
-                        <path d="M16 38 C28 47, 38 47, 50 40 C62 47, 72 47, 84 38 C76 54, 64 59, 50 57 C36 59, 24 54, 16 38 Z" stroke="#ffd740" stroke-width="2.2" fill="rgba(255,215,64,0.14)"/>
-                        <circle cx="50" cy="65" r="12" stroke="#ffd740" stroke-width="2.2" fill="rgba(255,215,64,0.18)"/>
-                        <path d="M73 16 C67 16, 63 20.5, 63 26 C63 33.5, 73 42, 73 42 C73 42, 83 33.5, 83 26 C83 20.5, 79 16, 73 16 Z" fill="#ffd740"/>
-                        <circle cx="73" cy="26" r="3.5" fill="#06111a"/>
-                    </svg>
-                    <img src="Gemini_Generated_Image_ayo7j1ayo7j1ayo7.jpg" alt="아르고스 대표 아이콘" class="relative z-10 w-full h-full object-cover rounded-2xl" onerror="this.style.display='none'" />
+        <!-- 2. 메인 타이틀 영역 -->
+        <section class="text-center space-y-4">
+            <div class="flex flex-col items-center">
+                <!-- ★ 2번 아이콘 위치: ./logo.png 적용 -->
+                <img src="./logo.png" onerror="this.onerror=null; this.src='./logo.jpg';" alt="ARGUS 메인 아이콘" class="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-2 border-cyan-400/50 shadow-[0_0_25px_rgba(0,229,255,0.3)] mb-3">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 text-xs font-semibold">
+                    <span>👮‍♂️ 인천계양경찰서 황시원 순경 제작</span>
                 </div>
             </div>
 
-            <!-- 제작자 배지 -->
-            <div>
-                <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#0b2132] border border-cyan-400/35 text-cyan-300 text-xs font-bold shadow">
-                    <span class="w-2 h-2 rounded-full bg-[#00e676] animate-pulse"></span>
-                    <span>인천계양경찰서 황시원 순경 제작</span>
-                </div>
-            </div>
-
-            <!-- 메인 타이틀 -->
-            <h1 class="text-2xl sm:text-4xl md:text-5xl font-black text-white leading-[1.28] tracking-tight">
-                기지국 위치추적 문자,<br />
-                <span class="text-[#00e5ff]">수신 즉시 지도에 바로 표시됩니다.</span>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-snug word-keep-all">
+                기지국 위치추적 문자,<br>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">수신 즉시 지도에 바로 표시됩니다.</span>
             </h1>
 
-            <!-- 서브 설명 ('개발되었습니다.' 후 줄바꿈 및 '동료 경찰관분들의' 반영) -->
-            <div class="text-slate-300 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto space-y-2.5 pt-1">
+            <div class="text-slate-300 text-xs sm:text-sm leading-relaxed space-y-2">
                 <p>
-                    수시로 날아오는 기지국 문자의 주소를 일일이 복사해 지도 앱에 검색하던 번거로움을 줄이기 위해 개발되었습니다.
+                    수시로 날아오는 기지국 문자의 주소를 일일이 복사해 지도 앱에 검색하느라 놓치던 골든타임을 지키기 위해 개발되었습니다.
                 </p>
-                <p class="text-white font-semibold">
+                <p class="text-cyan-200/90 font-medium">
                     일선 현장에서 뛰는 동료 경찰관분들의 신속한 추적과 피의자 검거에 작은 힘이 되기를 바랍니다.
                 </p>
             </div>
 
-            <!-- 핵심 장점 요약 배지 3종 -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 max-w-2xl mx-auto pt-2">
-                <div class="argus-card rounded-xl p-3 text-center">
-                    <div class="text-[11px] text-slate-400 font-semibold">지원 통신사</div>
-                    <div class="text-sm font-black text-[#00e5ff] mt-0.5">SKT · KT · LGU+</div>
-                    <div class="text-[10.5px] text-slate-400 mt-0.5">3사 양식 자동 분석</div>
+            <!-- 3대 핵심 장점 요약 카드 -->
+            <div class="grid grid-cols-3 gap-2 pt-2 text-left">
+                <div class="neon-card rounded-xl p-3">
+                    <div class="text-[10px] text-slate-400">지원 통신사</div>
+                    <div class="text-xs sm:text-sm font-extrabold text-cyan-400 mt-0.5">SKT · KT · LGU+</div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">모든 양식 자동인식</div>
                 </div>
-                <div class="argus-card rounded-xl p-3 text-center border-amber-400/35">
-                    <div class="text-[11px] text-slate-400 font-semibold">실시간 위치 대조</div>
-                    <div class="text-sm font-black text-[#ffd740] mt-0.5">내 폰 PCI · GPS</div>
-                    <div class="text-[10.5px] text-slate-400 mt-0.5">현장 기지국 일치 판별</div>
+                <div class="neon-card rounded-xl p-3">
+                    <div class="text-[10px] text-slate-400">실시간 위치 대조</div>
+                    <div class="text-xs sm:text-sm font-extrabold text-emerald-400 mt-0.5">내 폰 PCI · GPS</div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">현장 진입 즉시 판별</div>
                 </div>
-                <div class="argus-card rounded-xl p-3 text-center border-emerald-400/35">
-                    <div class="text-[11px] text-slate-400 font-semibold">다중 동선 · 체류 분석</div>
-                    <div class="text-sm font-black text-[#00e676] mt-0.5">자동 경로 · 체류 합산</div>
-                    <div class="text-[10.5px] text-slate-400 mt-0.5">대상자별 색상 분리 표시</div>
+                <div class="neon-card rounded-xl p-3">
+                    <div class="text-[10px] text-slate-400">다중 동선 · 체류 분석</div>
+                    <div class="text-xs sm:text-sm font-extrabold text-amber-400 mt-0.5">자동 경로 · 체류 합산</div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">번호별 색상 자동분리</div>
                 </div>
             </div>
+        </section>
 
-            <!-- 메인 CTA 버튼 (앱 전용 배포) -->
-            <div class="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2 max-w-md mx-auto">
-                <a href="./ARGUS.apk" download class="w-full sm:w-auto flex-1 py-3.5 px-5 rounded-xl font-extrabold text-sm bg-gradient-to-r from-[#00e5ff] to-[#00e676] text-slate-950 shadow-[0_0_20px_rgba(0,229,255,0.35)] text-center">
-                    📥 안드로이드 APK 다운로드
-                </a>
-                <a href="#install-guide" class="w-full sm:w-auto flex-1 py-3.5 px-5 rounded-xl font-bold text-sm bg-[#0c2233] hover:bg-[#123149] text-white border border-cyan-400/40 text-center transition">
-                    ⚙️ 앱 설치 안내 보기
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- 3. 2D 인터랙티브 라이브 체험 위젯 (마커 점과 반경 원 중심점 100% 일치, 버전 표기 제거) -->
-    <section id="live-demo" class="py-8 px-3.5 sm:px-6">
-        <div class="max-w-3xl mx-auto">
-            <!-- 섹션 안내 헤더 -->
-            <div class="text-center mb-4">
-                <span class="text-[11px] font-extrabold tracking-widest text-[#00e5ff] uppercase">LIVE INTERACTIVE PREVIEW</span>
-                <h2 class="text-lg sm:text-2xl font-black text-white mt-1">
-                    👇 아래 샘플 문자 버튼을 눌러 실제 작동을 확인해 보세요
+        <!-- 3. 2D 인터랙티브 라이브 체험 시뮬레이터 -->
+        <section class="space-y-3">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-bold text-cyan-300 flex items-center gap-1.5">
+                    <span>⚡</span> 버튼을 눌러 실제 앱 작동을 체험해 보세요
                 </h2>
-                <p class="text-xs sm:text-sm text-slate-400 mt-1">
-                    실제 아르고스(ARGUS) 앱에서 문자가 수신되었을 때 화면이 어떻게 변화하는지 보여주는 체험 화면입니다.
-                </p>
+                <span class="text-[11px] text-slate-400">터치 시 화면 전환</span>
             </div>
 
-            <!-- 시뮬레이션 트리거 버튼 3종 -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-                <button onclick="runDemoScenario(1)" id="demo-btn-1" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-cyan-500/20 border-[#00e5ff] text-white shadow-[0_0_12px_rgba(0,229,255,0.25)]">
-                    <span>1. 통신사별 PCI 및 기지국 문자 수신</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-400/20 text-cyan-300 shrink-0">클릭</span>
+            <!-- 시나리오 체험 버튼 3종 -->
+            <div class="grid grid-cols-1 gap-2">
+                <button onclick="setSimScenario(1)" id="sim-btn-1" class="text-left px-3.5 py-2.5 rounded-xl border border-cyan-400 bg-cyan-950/60 text-white transition flex items-center justify-between">
+                    <div>
+                        <div class="text-xs font-bold text-cyan-300">1. 통신사별 PCI 및 기지국 문자 수신</div>
+                        <div class="text-[11px] text-slate-300 mt-0.5 truncate">[281]12345678[1118-18:00]위치확인-인천 계양구 계산새로 68</div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-400 text-slate-950 shrink-0 ml-2">체험하기</span>
                 </button>
-                <button onclick="runDemoScenario(2)" id="demo-btn-2" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-[#0a1926] border-slate-700 text-slate-300 hover:border-emerald-400">
-                    <span>2. 동일 기지국 연속 체류 합산</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-400/20 text-emerald-300 shrink-0">클릭</span>
+
+                <button onclick="setSimScenario(2)" id="sim-btn-2" class="text-left px-3.5 py-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-300 hover:border-cyan-500/40 transition flex items-center justify-between">
+                    <div>
+                        <div class="text-xs font-bold text-emerald-300">2. 동일 기지국 연속 수신 (체류시간 자동 합산)</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 truncate">마커가 겹치지 않고 '25분째 체류중 (4회 연속)'으로 자동 누적</div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0 ml-2">체험하기</span>
                 </button>
-                <button onclick="runDemoScenario(3)" id="demo-btn-3" class="py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-[#0a1926] border-slate-700 text-slate-300 hover:border-rose-400">
-                    <span>3. 단말기 전원 꺼짐(OFF) 감지</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 shrink-0">클릭</span>
+
+                <button onclick="setSimScenario(3)" id="sim-btn-3" class="text-left px-3.5 py-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-300 hover:border-cyan-500/40 transition flex items-center justify-between">
+                    <div>
+                        <div class="text-xs font-bold text-rose-400">3. 단말기 전원 꺼짐 감지 및 경과 타이머</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 truncate">[281]12345678[1118-18:00]전원꺼짐-인천 계양구 계산새로 68</div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0 ml-2">체험하기</span>
                 </button>
             </div>
 
-            <!-- ★ 2D 플랫 아르고스 실제 앱 UI 프레임 ★ -->
-            <div class="rounded-2xl overflow-hidden border-2 border-cyan-500/40 bg-[#071018] shadow-2xl">
+            <!-- 실제 아르고스 2D 앱 화면 프리뷰 프레임 -->
+            <div class="rounded-2xl border-2 border-slate-700/90 bg-[#050d14] overflow-hidden shadow-2xl">
                 
-                <!-- (1) 앱 상단 헤더 (버전 배지 제거) -->
-                <div class="bg-[#06111a] px-3 py-2.5 border-b border-cyan-500/25 flex items-center justify-between gap-2">
+                <!-- 앱 상단 헤더 -->
+                <div class="px-3 py-2 bg-[#081521] border-b border-cyan-500/20 flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                        <div id="sim-header-dot" class="w-2.5 h-2.5 rounded-full bg-[#00e676] shadow-[0_0_8px_#00e676] shrink-0"></div>
+                        <span id="sim-header-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#00e676]"></span>
                         <div class="leading-tight">
-                            <div class="flex items-center gap-1.5">
-                                <span class="font-extrabold text-white text-xs sm:text-sm">아르고스</span>
-                            </div>
-                            <div class="text-[10px] text-[#00e5ff] font-semibold">경찰 기지국 위치추적 시스템</div>
-                            <div class="text-[9.5px] text-slate-400">인천계양경찰서 황시원 순경 제작</div>
+                            <span class="text-xs font-extrabold text-white">아르고스</span>
+                            <span class="text-[10px] text-cyan-400 block font-semibold">경찰 기지국 위치추적 시스템</span>
                         </div>
                     </div>
-                    <div class="flex items-center gap-1 shrink-0">
-                        <span class="px-2 py-1 rounded text-[10px] font-bold bg-amber-500/15 text-[#ffab00] border border-amber-500/40">💌 제보</span>
-                        <span class="px-2 py-1 rounded text-[10px] font-bold bg-emerald-500/15 text-[#00e676] border border-emerald-500/40">🔊 알림</span>
-                        <span class="px-2 py-1 rounded text-[10px] font-bold bg-rose-500/15 text-[#ff5252] border border-rose-500/40">초기화</span>
+                    <div class="flex gap-1">
+                        <span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40">💌 제보</span>
+                        <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">🔊 알림</span>
                     </div>
                 </div>
 
-                <!-- (2) 앱 4칸 KPI 상황판 (전화번호 5678, 일시 18:00 반영) -->
-                <div class="grid grid-cols-4 gap-1.5 p-2 bg-[#06111a] border-b border-cyan-500/20">
-                    <div class="bg-[#0a1b2a] p-2 rounded-lg border border-cyan-500/20">
-                        <div class="text-[9.5px] text-slate-400">📱 5678</div>
-                        <div id="sim-kpi-count" class="text-xs sm:text-sm font-black text-white mt-0.5">2 개소</div>
+                <!-- 앱 상단 4칸 상황판 -->
+                <div class="grid grid-cols-4 gap-1 p-1.5 bg-[#061019] border-b border-cyan-500/15 text-center">
+                    <div class="bg-[#0b1b29] rounded p-1.5 border border-cyan-500/15">
+                        <div class="text-[9px] text-slate-400">📱 5678</div>
+                        <div id="sim-kpi-count" class="text-xs font-extrabold text-white mt-0.5">2 개소</div>
                     </div>
-                    <div id="sim-status-box" class="bg-[#0a1b2a] p-2 rounded-lg border border-emerald-500/35">
-                        <div class="text-[9.5px] text-slate-400">단말기 상태</div>
-                        <div id="sim-kpi-status" class="text-[11px] sm:text-xs font-extrabold text-[#00e676] mt-0.5">🟢 켜짐 (18:00)</div>
+                    <div id="sim-kpi-status-box" class="bg-[#0b1b29] rounded p-1.5 border border-emerald-500/30">
+                        <div class="text-[9px] text-slate-400">단말기 상태</div>
+                        <div id="sim-kpi-status" class="text-[11px] font-extrabold text-emerald-400 mt-0.5 truncate">🟢 켜짐 (18:00)</div>
                     </div>
-                    <div class="bg-[#0a1b2a] p-2 rounded-lg border border-amber-400/40">
-                        <div class="text-[9.5px] text-slate-400">최근 PCI <span class="text-[#00e5ff] font-bold">ⓘ</span></div>
-                        <div id="sim-kpi-pci-target" class="text-[10.5px] font-extrabold text-white leading-tight mt-0.5">타겟: 281</div>
-                        <div id="sim-kpi-pci-my" class="text-[9.5px] font-extrabold text-[#00e676] leading-tight">📡내폰:281(5G) (🎯일치!)</div>
+                    <div class="bg-[#0b1b29] rounded p-1 border border-cyan-500/15">
+                        <div class="text-[9px] text-slate-400">최근 PCI <span class="text-cyan-400">ⓘ</span></div>
+                        <div class="text-[10px] font-extrabold text-white leading-tight mt-0.5">타겟: 281</div>
+                        <div class="text-[9px] font-extrabold text-emerald-400 leading-tight">📡내폰: 281(🎯일치!)</div>
                     </div>
-                    <div class="bg-[#0a1b2a] p-2 rounded-lg border border-cyan-500/20">
-                        <div class="text-[9.5px] text-slate-400">이동거리</div>
-                        <div id="sim-kpi-dist" class="text-xs sm:text-sm font-black text-[#00e5ff] mt-0.5">1.42 km</div>
+                    <div class="bg-[#0b1b29] rounded p-1.5 border border-cyan-500/15">
+                        <div class="text-[9px] text-slate-400">이동거리</div>
+                        <div class="text-xs font-extrabold text-cyan-300 mt-0.5">0.85 km</div>
                     </div>
                 </div>
 
-                <!-- (3) 추적 대상 전화번호 필터 바 -->
-                <div class="px-2.5 py-1.5 bg-[#07131e] border-b border-cyan-500/15 flex items-center gap-1.5 overflow-x-auto text-[10.5px]">
-                    <span class="text-slate-400 font-bold shrink-0">📱 추적 대상:</span>
-                    <span class="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-[#00e5ff] text-white font-bold shrink-0">전체 보기 (2)</span>
-                    <span class="px-2 py-0.5 rounded-full bg-[#0a1b2a] border border-[#00e676] text-emerald-300 font-bold shrink-0 flex items-center gap-1">
-                        <span class="w-1.5 h-1.5 rounded-full bg-[#00e676]"></span> 5678 (2) <span class="text-[9px] text-slate-300">👁️켜짐</span>
-                    </span>
-                </div>
-
-                <!-- (4) 가상 지도 영역 (★ 마커 점과 반경 원의 중심 좌표를 동일 부모 컨테이너 안에서 100% 고정) -->
-                <div class="relative h-64 sm:h-72 bg-[#081826] overflow-hidden select-none">
-                    <!-- 배경 지도 도로망 SVG -->
-                    <svg class="absolute inset-0 w-full h-full opacity-25 pointer-events-none" viewBox="0 0 400 260" preserveAspectRatio="none">
-                        <path d="M-20 50 L420 120 M70 -10 L140 280 M280 -10 L220 280 M-10 190 L420 150 M-10 230 L410 250" stroke="#3b6988" stroke-width="7" fill="none"/>
-                        <path d="M110 -10 L320 280 M-10 120 L410 30" stroke="#1e425b" stroke-width="2.5" fill="none"/>
+                <!-- 앱 가상 지도 영역 -->
+                <div class="relative h-64 bg-[#071622] overflow-hidden select-none">
+                    <!-- 배경 도로망 그리드 -->
+                    <svg class="absolute inset-0 w-full h-full opacity-25" xmlns="http://www.w3.org/2000/svg">
+                        <line x1="0" y1="55" x2="600" y2="120" stroke="#1e496b" stroke-width="10" />
+                        <line x1="90" y1="0" x2="240" y2="300" stroke="#1e496b" stroke-width="7" />
+                        <line x1="300" y1="0" x2="170" y2="300" stroke="#163752" stroke-width="5" />
+                        <line x1="0" y1="195" x2="600" y2="165" stroke="#163752" stroke-width="6" />
                     </svg>
 
-                    <!-- 좌측 상단: 가로 1줄 슬림 토글 칩 -->
-                    <div class="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap gap-1 z-20">
-                        <span class="px-2.5 py-1 rounded-full bg-[#06111a]/85 border border-cyan-500/40 text-[10px] font-bold text-cyan-200">🔵 반경 ON</span>
-                        <span class="px-2.5 py-1 rounded-full bg-[#06111a]/85 border border-cyan-500/40 text-[10px] font-bold text-cyan-200">⚡ 동선 ON</span>
-                        <span class="px-2.5 py-1 rounded-full bg-[#06111a]/85 border border-cyan-500/40 text-[10px] font-bold text-cyan-200">🏷️ 라벨:자동</span>
+                    <!-- 상단 슬림 미니 토글 칩 -->
+                    <div class="absolute top-2 left-2 flex gap-1 z-20">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#06111a]/85 text-cyan-300 border border-cyan-500/40">🔵 반경 ON</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#06111a]/85 text-cyan-300 border border-cyan-500/40">⚡ 동선 ON</span>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#06111a]/85 text-cyan-300 border border-cyan-500/40">🏷️ 라벨:자동</span>
                     </div>
 
-                    <!-- 두 기지국(경유지 #1: left 24%, top 72% / 현재 타겟 #2: left 55%, top 45%) 사이의 이동 동선 점선 -->
-                    <svg class="absolute inset-0 w-full h-full pointer-events-none z-0">
-                        <line x1="24%" y1="72%" x2="55%" y2="45%" stroke="#00e676" stroke-width="3" stroke-dasharray="6 4"/>
+                    <!-- #1번 과거 기지국과 #2번 현재 기지국을 잇는 이동 동선 점선 -->
+                    <svg class="absolute inset-0 w-full h-full pointer-events-none z-10">
+                        <line x1="22%" y1="68%" x2="56%" y2="42%" stroke="#00e676" stroke-width="3" stroke-dasharray="6 4" />
                     </svg>
 
-                    <!-- ★ 경유지 #1 (left: 24%, top: 72%): 반경 원과 중심 점이 하나의 컨테이너 안에서 완벽히 일치 -->
-                    <div class="absolute z-10" style="left: 24%; top: 72%; transform: translate(-50%, -50%);">
-                        <div class="w-4 h-4 relative flex items-center justify-center">
-                            <!-- #1 반경 원 -->
-                            <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[72px] h-[72px] rounded-full border border-dashed border-[#00e676]/55 bg-[#00e676]/[0.05] pointer-events-none"></div>
-                            <!-- #1 중심 점 -->
-                            <div class="relative z-10 w-3.5 h-3.5 rounded-full bg-[#00e676] border-2 border-white shadow"></div>
-                            <!-- #1 미니 배지 -->
-                            <span class="absolute left-5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded bg-[#06111a]/95 border border-emerald-400/50 text-[9.5px] font-extrabold text-emerald-200 whitespace-nowrap shadow">
-                                PCI:104
-                            </span>
+                    <!-- 과거 기지국 #1 -->
+                    <div class="absolute left-[22%] top-[68%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
+                        <div class="w-3 h-3 rounded-full bg-emerald-400/60 border border-white"></div>
+                        <span class="mt-1 px-1.5 py-0.5 rounded bg-slate-900/90 border border-emerald-500/40 text-[9px] text-emerald-300 font-bold whitespace-nowrap">PCI:142</span>
+                    </div>
+
+                    <!-- 현재 기지국 #2 (반경 원 + 중심 마커 점 + 정보 라벨이 100% 같은 중심점(56%, 42%)에 고정됨) -->
+                    <div class="absolute left-[56%] top-[42%] z-20">
+                        <!-- 400m 반경 원 -->
+                        <div id="sim-radius-circle" class="w-36 h-36 rounded-full border-2 border-dashed border-[#00e676] bg-[#00e676]/10 -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-colors duration-300"></div>
+                        <!-- 파동 링 -->
+                        <div id="sim-ripple-1" class="sim-ripple"></div>
+                        <!-- 정중앙 마커 코어 점 -->
+                        <div id="sim-core-dot" class="w-3.5 h-3.5 rounded-full bg-[#00e676] border-2 border-white shadow-[0_0_12px_#00e676] -translate-x-1/2 -translate-y-1/2 absolute left-1/2 top-1/2"></div>
+                        <!-- 마커 하단 라벨 -->
+                        <div id="sim-marker-label" class="absolute left-1/2 top-3 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-[#041220]/95 border border-emerald-400 text-[10px] text-white font-bold shadow-xl whitespace-nowrap text-center">
+                            <div><span class="text-cyan-300">📱5678</span> #2 활성 [PCI:281]</div>
+                            <div id="sim-marker-sub" class="text-[9px] text-emerald-300 font-normal mt-0.5">🕒 확인: 11/18 18:00</div>
                         </div>
                     </div>
 
-                    <!-- ★ 현재 활성 타겟 마커 #2 (left: 55%, top: 45%): 반경 원, 파동 링, 중심 점이 1px 오차 없이 정중앙 일치 -->
-                    <div class="absolute z-20" style="left: 55%; top: 45%; transform: translate(-50%, -50%);">
-                        <div class="w-4 h-4 relative flex items-center justify-center">
-                            <!-- #2 400m 반경 원 -->
-                            <div id="sim-map-circle" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[108px] h-[108px] rounded-full border-2 border-dashed border-[#00e676] bg-[#00e676]/[0.12] pointer-events-none transition-colors duration-300"></div>
-                            <!-- #2 레이더 파동 링 2개 -->
-                            <div id="sim-pulse-1" class="w-8 h-8 rounded-full border-2 border-[#00e676] pulse-ring pointer-events-none"></div>
-                            <div id="sim-pulse-2" class="w-8 h-8 rounded-full border-2 border-[#00e676] pulse-ring-delay pointer-events-none"></div>
-                            <!-- #2 기지국 중심 점 -->
-                            <div id="sim-node-core" class="relative z-10 w-4 h-4 rounded-full bg-[#00e676] border-2 border-white shadow-[0_0_12px_#00e676]"></div>
-                            <!-- #2 상세 정보 라벨 (중심점 바로 위에 고정) -->
-                            <div id="sim-node-label" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#06111a]/95 border border-[#00e676] rounded-xl px-2.5 py-1.5 shadow-xl whitespace-nowrap">
-                                <div id="sim-marker-title" class="text-[10.5px] font-extrabold text-white">
-                                    <span class="text-[#00e5ff]">📱5678</span> #2 활성 [PCI:281]
-                                </div>
-                                <div id="sim-marker-sub" class="text-[9.5px] text-emerald-300 font-semibold mt-0.5">
-                                    🕒 확인: 11/18 18:00
-                                </div>
-                            </div>
-                        </div>
+                    <!-- 수사관 내 위치 실시간 GPS 파란색 마커 -->
+                    <div class="absolute left-[69%] top-[63%] z-20">
+                        <div class="gps-ripple"></div>
+                        <div class="w-3.5 h-3.5 rounded-full bg-blue-500 border-2 border-white shadow-[0_0_10px_#00e5ff] -translate-x-1/2 -translate-y-1/2 absolute left-1/2 top-1/2"></div>
+                        <span class="absolute left-1/2 top-2.5 -translate-x-1/2 px-1.5 py-0.5 rounded bg-[#041222]/95 border border-cyan-400 text-[9px] font-extrabold text-cyan-300 whitespace-nowrap shadow">
+                            내 위치 [PCI:281]
+                        </span>
                     </div>
 
-                    <!-- ★ 수사관 내 위치 GPS 마커 (left: 69%, top: 68%) -->
-                    <div class="absolute z-10" style="left: 69%; top: 68%; transform: translate(-50%, -50%);">
-                        <div class="w-4 h-4 relative flex items-center justify-center">
-                            <div class="w-7 h-7 rounded-full bg-cyan-400/30 border border-[#00e5ff] pulse-ring pointer-events-none"></div>
-                            <div class="relative z-10 w-3.5 h-3.5 rounded-full bg-[#2979ff] border-2 border-white shadow-[0_0_10px_#00e5ff]"></div>
-                            <span class="absolute top-5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-[#041222]/95 border border-[#00e5ff] text-[#00e5ff] font-extrabold text-[9px] whitespace-nowrap shadow">
-                                내 위치 [PCI:281]
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- 우측 하단 줌/내위치/타겟 FAB 버튼 -->
-                    <div class="absolute right-2.5 bottom-2.5 flex flex-col gap-1.5 z-20">
-                        <div class="w-7 h-7 rounded-full bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-white font-bold text-sm">+</div>
-                        <div class="w-7 h-7 rounded-full bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-white font-bold text-sm">−</div>
-                        <div class="w-7 h-7 rounded-full bg-cyan-500/25 border border-[#00e5ff] flex items-center justify-center text-xs shadow-[0_0_8px_rgba(0,229,255,0.5)]">🧭</div>
-                        <div class="w-7 h-7 rounded-full bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-xs">🎯</div>
+                    <!-- 우측 하단 줌/GPS/타겟 버튼 -->
+                    <div class="absolute bottom-2 right-2 flex flex-col gap-1 z-20">
+                        <div class="w-7 h-7 rounded-lg bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-xs font-bold text-white">+</div>
+                        <div class="w-7 h-7 rounded-lg bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-xs font-bold text-white">−</div>
+                        <div class="w-7 h-7 rounded-lg bg-cyan-500/25 border border-cyan-400 flex items-center justify-center text-xs shadow-[0_0_8px_rgba(0,229,255,0.5)]">🧭</div>
+                        <div class="w-7 h-7 rounded-lg bg-[#06111a]/90 border border-cyan-500/40 flex items-center justify-center text-xs">🎯</div>
                     </div>
                 </div>
 
-                <!-- (5) 하단 기지국 수신 내역 카드 & 시뮬레이션 문자 표시줄 (12345678 / 1118-18:00 / 인천 계양구 계산새로 68) -->
-                <div class="bg-[#06111a] p-3 border-t border-cyan-500/25 space-y-2">
-                    <div class="text-[11px] bg-[#0a1926] px-2.5 py-1.5 rounded-lg border border-slate-700/80 text-cyan-200 truncate">
-                        <span class="font-extrabold text-[#ffab00]">📩 수신된 문자:</span>
-                        <span id="sim-raw-sms" class="ml-1 text-slate-300">[281] 12345678 [1118-18:00] 위치확인 인천 계양구 계산새로 68</span>
-                    </div>
-
-                    <div id="sim-log-card" class="bg-[#0b1d2c] border-l-4 border-[#00e676] rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div class="space-y-1">
-                            <div class="flex flex-wrap items-center gap-1.5">
-                                <span class="px-1.5 py-0.5 rounded bg-[#00e676] text-slate-950 font-extrabold text-[10px]">📱 5678</span>
-                                <span id="sim-card-badge" class="px-1.5 py-0.5 rounded bg-[#00e676] text-slate-950 font-extrabold text-[10px]">기지국 #2</span>
-                                <span id="sim-card-status" class="px-2 py-0.5 rounded bg-emerald-500/20 text-[#00e676] font-bold text-[10px]">🟢 신호 활성</span>
-                                <span class="text-xs font-extrabold text-white">인천 계양구 계산새로 68</span>
-                            </div>
-                            <div id="sim-card-meta" class="text-[10.5px] text-slate-400">
-                                기지국 PCI: <b class="text-white">281</b> | 확인일시: <b class="text-white">11/18 18:00</b> | 상세이력 보기(터치)
-                            </div>
+                <!-- 앱 하단 수신 내역 카드 -->
+                <div class="p-2.5 bg-[#08131e] border-t border-cyan-500/20">
+                    <div id="sim-log-card" class="p-2.5 rounded-lg bg-[#0d1f30] border-l-4 border-emerald-400 text-xs space-y-1">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-400 text-slate-950">📱 5678</span>
+                            <span id="sim-log-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/40">🟢 신호 활성</span>
+                            <span class="font-bold text-white">인천 계양구 계산새로 68</span>
                         </div>
-                        <div class="flex items-center gap-1 shrink-0">
-                            <span class="px-2 py-1 rounded bg-[#06111a] border border-cyan-500/30 text-[10px] text-cyan-300 font-bold">카카오맵</span>
-                            <span class="px-2 py-1 rounded bg-[#06111a] border border-cyan-500/30 text-[10px] text-cyan-300 font-bold">로드뷰</span>
-                            <span class="px-2 py-1 rounded bg-[#06111a] border border-cyan-500/30 text-[10px] text-cyan-300 font-bold">네이버</span>
+                        <div id="sim-log-meta" class="text-[11px] text-slate-300">
+                            기지국 PCI: <b class="text-cyan-300">281</b> | 확인일시: <b>11/18 18:00</b> | 상세이력(터치)
                         </div>
                     </div>
                 </div>
-
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- 4. 핵심 기능 3가지 (특정 통신사 편향 문구 및 도로명 보정 내용 제거, 자동 분석 예시 4대 요소 하이라이트 100% 일치) -->
-    <section id="features" class="py-12 px-4 max-w-5xl mx-auto">
-        <div class="text-center mb-8">
-            <span class="text-xs font-extrabold tracking-widest text-[#00e5ff] uppercase">KEY FEATURES</span>
-            <h2 class="text-xl sm:text-3xl font-black text-white mt-1">
+        <!-- 4. 핵심 기능 상세 설명 (3가지 핵심 구성) -->
+        <section class="space-y-4">
+            <h2 class="text-lg font-extrabold text-white border-l-4 border-cyan-400 pl-3">
                 수사 현장에 꼭 필요한 기능만 담았습니다
             </h2>
-        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
-
-            <!-- 기능 카드 1: 통신사별 기지국 문자 양식 자동 인식 (LGU+ 특정 언급 제거 & 4가지 색상 하이라이트-배지 완벽 매칭) -->
-            <div class="argus-card rounded-2xl p-5 flex flex-col justify-between space-y-4">
-                <div class="space-y-2">
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/15 text-[#00e5ff] text-xs font-extrabold">
-                        <span>01 · 통신사별 문자 양식 자동 인식</span>
-                    </div>
-                    <h3 class="text-lg font-black text-white leading-snug">
-                        통신사별 기지국 문자 양식 및 <span class="text-[#00e5ff]">PCI 값 자동 인식</span>
-                    </h3>
-                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                        SKT·KT·LGU+ 및 알뜰폰까지 통신사마다 제각각인 기지국 위치추적 문자 양식을 정확하게 인식합니다. 문자에 포함된 기지국 PCI 번호, 대상 전화번호, 확인 일시, 단말기 상태와 기지국 주소를 빠짐없이 추출해 지도에 즉시 표시합니다.
-                    </p>
+            <!-- 기능 1: 통신사 3사 문자 양식 자동 분석 -->
+            <div class="neon-card rounded-2xl p-4 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">기능 01</span>
+                    <span class="text-xs text-slate-400 font-semibold">SKT · KT · LGU+ 3사 통합</span>
                 </div>
-
-                <!-- 2D 미니 UI 그래픽 (PCI: cyan / 번호: green / 일시: purple / 주소: amber 4가지 색상 하이라이트와 하단 배지 100% 일치) -->
-                <div class="bg-[#06111a] rounded-xl p-3.5 border border-cyan-500/20 space-y-2.5 text-xs">
-                    <div class="text-[11px] text-slate-400 font-bold">자동 분석 예시:</div>
-                    <div class="p-2.5 rounded-lg bg-[#0b1d2c] text-slate-300 font-mono text-[11px] leading-relaxed break-all">
-                        <span class="text-[#00e5ff] font-bold">[281]</span> <span class="text-[#00e676] font-bold">12345678</span> <span class="text-purple-300 font-bold">[1118-18:00]</span> 위치확인 <span class="text-[#ffd740] font-bold">인천 계양구 계산새로 68</span>
-                    </div>
-                    <div class="flex flex-wrap gap-1.5 pt-0.5 text-[10.5px] font-bold">
-                        <span class="px-2 py-0.5 rounded bg-cyan-500/20 text-[#00e5ff] border border-cyan-400/30">PCI: 281</span>
-                        <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-[#00e676] border border-emerald-400/30">번호: 5678</span>
-                        <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-400/30">일시: 11/18 18:00</span>
-                        <span class="px-2 py-0.5 rounded bg-amber-500/20 text-[#ffd740] border border-amber-400/30">주소: 인천 계양구 계산새로 68</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 기능 카드 2: 동일 기지국 연속 체류 시간 합산 및 전원 꺼짐 감지 -->
-            <div class="argus-card rounded-2xl p-5 flex flex-col justify-between space-y-4 border-emerald-400/35">
-                <div class="space-y-2">
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/15 text-[#00e676] text-xs font-extrabold">
-                        <span>02 · 연속 체류 합산 & 전원 꺼짐 감지</span>
-                    </div>
-                    <h3 class="text-lg font-black text-white leading-snug">
-                        동일 기지국 <span class="text-[#00e676]">연속 체류 시간 합산</span> 및 <span class="text-[#ffab00]">전원 꺼짐 감지</span>
-                    </h3>
-                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                        동일한 기지국(PCI)에서 연속으로 신호가 잡히면 마커가 어지럽게 겹치지 않고 머무른 시간을 자동으로 합산해 보여줍니다. 단말기 전원이 꺼진 경우에는 마지막 포착 위치에 오프라인 경과 시간을 실시간으로 카운트합니다.
-                    </p>
-                </div>
-
-                <!-- 2D 미니 UI 그래픽 (가상 번호 5678 적용) -->
-                <div class="bg-[#06111a] rounded-xl p-3.5 border border-emerald-500/25 space-y-2 text-xs">
-                    <div class="text-[11px] text-slate-400 font-bold">체류 합산 및 상태 표시 예시:</div>
-                    <div class="p-2 rounded-lg bg-[#0b1f30] border border-emerald-500/30 flex items-center justify-between">
-                        <span class="font-bold text-white text-[11px]">📱 5678 · 기지국 #2 (PCI:281)</span>
-                        <span class="px-2 py-0.5 rounded bg-emerald-500/25 text-[#00e676] font-extrabold text-[10px]">25분 체류중</span>
-                    </div>
-                    <div class="text-[11px] text-slate-400">🕒 11/18 18:00 ~ 18:25 (6회 연속 수신 자동 합산)</div>
-                </div>
-            </div>
-
-            <!-- 기능 카드 3: 다중 대상자 동선 분리 & 동일 뒷자리 자동 구분 -->
-            <div class="argus-card rounded-2xl p-5 flex flex-col justify-between space-y-4 border-amber-400/35">
-                <div class="space-y-2">
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 text-[#ffd740] text-xs font-extrabold">
-                        <span>03 · 다중 동선 분리 & 뒷자리 자동 구분</span>
-                    </div>
-                    <h3 class="text-lg font-black text-white leading-snug">
-                        다중 대상자 <span class="text-[#00e5ff]">동선 색상 분리</span> 및 <span class="text-[#ffd740]">동일 뒷자리 자동 구분</span>
-                    </h3>
-                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                        여러 대상자를 동시에 추적할 때 번호별 고유 색상으로 이동 경로를 분리합니다. 평소에는 번호를 <code class="text-white">5678</code>처럼 4자리로 간결하게 표시하다가, 가족 명의 등 뒷자리가 같은 번호가 들어오면 자동으로 가운뎃자리까지 확장해 구분합니다.
-                    </p>
-                </div>
-
-                <!-- 2D 미니 UI 그래픽 (가상 번호 1234-5678 / 0000-5678 적용) -->
-                <div class="bg-[#06111a] rounded-xl p-3.5 border border-amber-400/30 space-y-2 text-xs">
-                    <div class="text-[11px] text-slate-400 font-bold">동일 뒷자리 자동 구분 예시:</div>
-                    <div class="flex flex-wrap items-center gap-1.5">
-                        <span class="px-2.5 py-1 rounded-full bg-[#0b1f30] border border-[#00e676] text-emerald-300 font-bold text-[11px]">🟢 1234-5678</span>
-                        <span class="px-2.5 py-1 rounded-full bg-[#0b1f30] border border-[#ffab00] text-amber-300 font-bold text-[11px]">🟡 0000-5678</span>
-                    </div>
-                    <div class="text-[11px] text-cyan-300 font-bold pt-0.5">➔ 서로 다른 색상의 동선으로 자동 분리</div>
-                </div>
-            </div>
-
-        </div>
-    </section>
-
-    <!-- 5. 안드로이드 앱(APK) 설치 안내 (세부정보 더보기 문구 제거 & 최초 실행 권한 팝업 안내 반영) -->
-    <section id="install-guide" class="py-12 px-4 border-t border-cyan-500/15 bg-[#050d14]">
-        <div class="max-w-4xl mx-auto">
-            <div class="text-center mb-6">
-                <span class="text-xs font-extrabold tracking-widest text-[#ffab00] uppercase">INSTALLATION GUIDE</span>
-                <h2 class="text-xl sm:text-3xl font-black text-white mt-1">
-                    안드로이드 앱(APK) 설치 안내
-                </h2>
-                <p class="text-xs sm:text-sm text-slate-300 mt-2 max-w-2xl mx-auto leading-relaxed">
-                    안드로이드 스마트폰은 플레이스토어·갤럭시스토어 등 공식 스토어가 아닌 경로로 배포된 앱을 기본 차단하고 있습니다. 아래 순서대로 설정하신 뒤 설치해 주세요.
+                <h3 class="text-base font-bold text-white">통신사별 기지국 문자 양식 100% 자동 분석</h3>
+                <p class="text-xs text-slate-300 leading-relaxed">
+                    통신사마다 제각각인 기지국 위치추적 문자 양식을 자동으로 판별하여 <b>전화번호, 기지국 PCI, 확인 일시, 단말기 상태(켜짐/꺼짐), 주소</b>를 즉시 추출해 지도에 표시합니다.
                 </p>
-
-                <!-- 상단 우측 버튼과 동일한 APK 다운로드 버튼 -->
-                <div class="mt-5">
-                    <a href="./ARGUS.apk" download class="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl text-sm sm:text-base font-extrabold bg-[#00e676] text-slate-950 shadow-[0_0_20px_rgba(0,230,118,0.4)] hover:brightness-110 transition">
-                        <span>📥 APK 다운로드</span>
-                    </a>
+                <div class="p-3 rounded-xl bg-slate-950/90 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1.5">
+                    <div class="text-slate-400 text-[10px]">▼ 자동 분석 예시</div>
+                    <div>[<span class="text-cyan-400 font-bold">281</span>]010-1234-<span class="text-emerald-400 font-bold">5678</span>[<span class="text-amber-300 font-bold">1118-18:00</span>]위치확인-<span class="text-purple-300 font-bold">인천 계양구 계산새로 68</span></div>
+                    <div class="flex flex-wrap gap-1.5 pt-1 text-[10px] font-sans">
+                        <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/30">PCI: 281</span>
+                        <span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30">번호: 5678</span>
+                        <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30">일시: 11/18 18:00</span>
+                        <span class="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-500/30">주소: 인천 계양구 계산새로 68</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                <!-- STEP 1: 보안 위험 자동 차단 해제 -->
-                <div class="argus-card rounded-2xl p-5 border-amber-400/40">
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-[#ffab00] font-extrabold text-xs">STEP 01 · 설치 전 설정</span>
-                        <span class="text-xl">🔓</span>
-                    </div>
-                    <h4 class="font-black text-white text-base">보안 위험 자동 차단 해제</h4>
-                    <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        공식 스토어 외 앱 설치 차단을 해제하기 위해 스마트폰 <b class="text-white">설정 ➔ 보안 및 개인정보 보호 ➔ 보안 위험 자동 차단</b> 스위치를 <b class="text-[#ffab00]">꺼짐(OFF)</b>으로 변경해 주세요.
-                    </p>
+            <!-- 기능 2: 내 휴대폰 실시간 PCI & GPS 현위치 비교 -->
+            <div class="neon-card rounded-2xl p-4 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">기능 02</span>
+                    <span class="text-xs text-slate-400 font-semibold">현장 수색 범위 압축</span>
                 </div>
-
-                <!-- STEP 2: 바로 뜨는 창에서 무시하고 설치 선택 ('세부정보 더보기' 언급 없음) -->
-                <div class="argus-card rounded-2xl p-5 border-cyan-400/40">
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-[#00e5ff] font-extrabold text-xs">STEP 02 · 설치 실행 시</span>
-                        <span class="text-xl">📲</span>
-                    </div>
-                    <h4 class="font-black text-white text-base">'무시하고 설치' 진행</h4>
-                    <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        다운로드한 APK 파일을 눌러 설치를 실행하면 <b class="text-white">'인증되지 않은 출처의 앱'</b> 안내 창이 뜹니다. 창에 바로 표시되는 <b class="text-[#00e5ff]">[무시하고 설치]</b>를 눌러 설치를 진행해 주세요.
-                    </p>
-                </div>
-
-                <!-- STEP 3: 앱 최초 실행 시 자동 팝업 권한 허용 -->
-                <div class="argus-card rounded-2xl p-5 border-emerald-400/40">
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-[#00e676] font-extrabold text-xs">STEP 03 · 최초 실행 시</span>
-                        <span class="text-xl">🔔</span>
-                    </div>
-                    <h4 class="font-black text-white text-base">앱 최초 실행 시 권한 허용</h4>
-                    <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        앱을 처음 켤 때 자동으로 뜨는 <b class="text-[#00e676]">위치(GPS) 권한</b> 및 <b class="text-[#00e676]">알림 허용(문자 자동 감지) 권한</b> 안내 창에서 <b class="text-white">허용</b>을 눌러주시면 모든 준비가 완료됩니다.
-                    </p>
+                <h3 class="text-base font-bold text-white">내 휴대폰 실시간 PCI 스캔 및 현위치(GPS) 표시</h3>
+                <p class="text-xs text-slate-300 leading-relaxed">
+                    낯선 현장에 출동했을 때 <b>🧭 버튼</b>을 누르면 지도 위에 내 현재 위치(GPS)가 파란색 레이더 점으로 실시간 표시됩니다. 또한 현재 내 스마트폰이 잡고 있는 기지국 PCI 값을 3초마다 스캔하여 대상자의 PCI와 일치하면 <b class="text-emerald-400">(🎯일치!)</b> 알림을 띄워줍니다.
+                </p>
+                <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/95 leading-relaxed">
+                    💡 <b>통신망 및 알뜰폰(MVNO) PCI 비교 안내</b><br>
+                    • 동일 위치라도 통신망(SKT·KT·LGU+)이 같아야 동일한 PCI 값이 표시됩니다.<br>
+                    • <b>별정통신사(알뜰폰)</b>는 브랜드와 관계없이 실제 임대해 사용하는 모회사 통신망(SKT망 알뜰폰=SKT, KT망 알뜰폰=KT, LGU+망 알뜰폰=LGU+)과 100% 동일한 PCI 값을 표시합니다.
                 </div>
             </div>
 
-            <!-- 하단 제보 및 다운로드 박스 -->
-            <div class="mt-8 argus-card rounded-2xl p-5 sm:p-6 border-cyan-400/40 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div class="text-center sm:text-left space-y-1">
-                    <div class="text-base sm:text-lg font-black text-white">인식 안 되는 문자 양식이나 건의사항이 있으신가요?</div>
-                    <div class="text-xs text-slate-300">
-                        제보 전용 폴리스메일: <strong class="text-[#ffab00]">coool@police.go.kr</strong> (인천계양경찰서 수사과 순경 황시원)
+            <!-- 기능 3: 동일 기지국 체류시간 합산 & 다중 번호 분리 -->
+            <div class="neon-card rounded-2xl p-4 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">기능 03</span>
+                    <span class="text-xs text-slate-400 font-semibold">동선 겹침 방지</span>
+                </div>
+                <h3 class="text-base font-bold text-white">체류 시간 자동 합산 & 공범·가족 번호 스마트 분리</h3>
+                <p class="text-xs text-slate-300 leading-relaxed">
+                    대상자가 한곳에 머물러 동일 PCI 문자가 여러 번 와도 마커가 지저분하게 겹치지 않고 <b>"18:00 ~ 18:25 (25분째 체류중)"</b>으로 깔끔하게 합산됩니다. 여러 대의 전화번호를 동시에 추적할 때는 고유 색상별로 동선이 나뉘며, 뒷자리(`5678`)가 같은 가족·공범 번호가 들어오면 자동으로 앞자리까지(`1234-5678`, `0000-5678`) 구분해 표시합니다.
+                </p>
+            </div>
+        </section>
+
+        <!-- 5. 안드로이드 APK 다운로드 및 보안 차단 해제 가이드 -->
+        <section id="install-guide" class="space-y-4 pt-2">
+            <div class="neon-card rounded-2xl p-5 border-emerald-500/40 bg-gradient-to-b from-[#0b2228] to-[#081520] space-y-4">
+                <div class="space-y-1">
+                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-400 text-slate-950">ANDROID 전용</span>
+                    <h2 class="text-lg font-extrabold text-white pt-1">
+                        📲 아르고스(ARGUS) APK 설치 및 권한 설정 안내
+                    </h2>
+                    <p class="text-xs text-slate-300">
+                        아르고스는 플레이스토어·갤럭시스토어 등 외부 스토어를 거치지 않고 전용 설치 파일(APK)로 배포됩니다. 설치 전 아래 순서대로 설정을 확인해 주세요.
+                    </p>
+                </div>
+
+                <!-- APK 다운로드 메인 버튼 -->
+                <a href="./ARGUS.apk" download class="w-full py-3.5 px-4 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,230,118,0.4)] transition">
+                    <span>📥</span> 아르고스 안드로이드 APK 다운로드
+                </a>
+
+                <!-- 단계별 설치 및 보안 해제 안내 -->
+                <div class="space-y-2.5 text-xs">
+                    <div class="p-3.5 rounded-xl bg-slate-950/85 border border-amber-500/40 space-y-1">
+                        <div class="font-extrabold text-amber-300">STEP 1. 갤럭시 '보안 위험 자동 차단' 해제 (설치 전 필수)</div>
+                        <p class="text-slate-300 text-[11px] leading-relaxed">
+                            안드로이드는 플레이스토어·갤럭시스토어 등 공식 경로가 아닌 앱의 설치를 기본 차단하고 있습니다.<br>
+                            스마트폰 <b>[설정] ➔ [보안 및 개인정보 보호] ➔ [보안 위험 자동 차단]</b>을 <b>꺼짐(OFF)</b>으로 바꾸어야 APK 설치가 가능합니다.
+                        </p>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl bg-slate-950/85 border border-cyan-500/30 space-y-1">
+                        <div class="font-extrabold text-cyan-300">STEP 2. '인증되지 않은 출처의 앱' 안내창에서 [무시하고 설치] 선택</div>
+                        <p class="text-slate-300 text-[11px] leading-relaxed">
+                            다운로드한 APK 파일을 실행하면 <b>'인증되지 않은 출처의 앱'</b>이라는 보안 안내창이 뜹니다. 해당 창에서 바로 <b>[무시하고 설치]</b>를 눌러 설치를 완료해 주세요.
+                        </p>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-1">
+                        <div class="font-extrabold text-emerald-300">STEP 3. 앱 최초 실행 시 권한 허용 안내</div>
+                        <p class="text-slate-300 text-[11px] leading-relaxed">
+                            어플을 처음 켤 때 <b>위치(GPS) 권한</b>과 <b>알림 허용 권한</b>을 허용할 것인지 묻는 알림창이 자동으로 뜹니다. 그때 모두 <b>[허용]</b>을 눌러주시면 실시간 문자 자동 인식과 내 위치·PCI 표시가 정상 작동합니다.
+                        </p>
                     </div>
                 </div>
-                <div class="flex flex-wrap items-center justify-center gap-2 w-full sm:w-auto shrink-0">
-                    <button onclick="copyFeedbackEmail()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl font-extrabold text-xs bg-amber-500/20 hover:bg-amber-500/30 text-[#ffab00] border border-amber-400/50 transition">
-                        📋 이메일 주소 복사
-                    </button>
-                    <a href="./ARGUS.apk" download class="w-full sm:w-auto px-5 py-2.5 rounded-xl font-extrabold text-xs bg-[#00e676] text-slate-950 text-center hover:brightness-110 transition">
-                        📥 APK 다운로드
-                    </a>
-                </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- 6. 푸터 (수사 및 피의자 검거 목적 명시) -->
-    <footer class="py-8 px-4 border-t border-slate-800/80 text-center text-xs text-slate-400">
-        <div class="max-w-4xl mx-auto space-y-1.5">
-            <div class="font-extrabold text-white">ARGUS (아르고스) - 경찰 기지국 위치추적 시스템</div>
-            <div>제작: 인천계양경찰서 수사과 순경 황시원 (문의 및 제보: coool@police.go.kr)</div>
-            <div class="text-[11px] text-slate-500 pt-1">본 시스템은 일선 현장 경찰관의 신속한 수사 및 피의자 검거 지원을 위해 제작되었습니다.</div>
-        </div>
-    </footer>
+        <!-- 6. 하단 푸터 -->
+        <footer class="pt-6 border-t border-slate-800/80 text-center space-y-2 text-xs text-slate-400">
+            <div class="font-bold text-slate-200">ARGUS (아르고스) - 경찰 기지국 위치추적 시스템</div>
+            <div>제작 및 문의: 인천계양경찰서 수사과 순경 황시원 (<span class="text-cyan-400 underline">coool@police.go.kr</span>)</div>
+            <div class="text-[11px] text-slate-500 pt-1">
+                본 시스템은 일선 현장 경찰관의 신속한 수사 및 피의자 검거 지원을 위해 제작되었습니다.
+            </div>
+        </footer>
 
-    <!-- 아르고스 전용 다크 네온 알림 토스트 (브라우저 기본 alert 미사용) -->
-    <div id="argus-toast" class="fixed bottom-5 left-4 right-4 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-50 hidden max-w-sm mx-auto bg-[#06111a]/95 border border-[#00e5ff] rounded-xl px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.85)] text-center">
-        <div id="argus-toast-text" class="text-xs sm:text-sm font-bold text-[#e6f4ff]"></div>
-    </div>
+    </main>
 
-    <!-- 인터랙티브 데모 시뮬레이터 스크립트 (12345678 / 인천 계양구 계산새로 68 / 1118-18:00 적용) -->
+    <!-- 2D 시뮬레이터 시나리오 전환 스크립트 -->
     <script>
-        function runDemoScenario(mode) {
-            const btn1 = document.getElementById('demo-btn-1');
-            const btn2 = document.getElementById('demo-btn-2');
-            const btn3 = document.getElementById('demo-btn-3');
-
+        function setSimScenario(num) {
+            const btn1 = document.getElementById('sim-btn-1');
+            const btn2 = document.getElementById('sim-btn-2');
+            const btn3 = document.getElementById('sim-btn-3');
             [btn1, btn2, btn3].forEach(b => {
-                b.className = "py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-[#0a1926] border-slate-700 text-slate-300";
+                b.className = "text-left px-3.5 py-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-300 transition flex items-center justify-between";
             });
 
+            const activeBtn = document.getElementById('sim-btn-' + num);
+            activeBtn.className = "text-left px-3.5 py-2.5 rounded-xl border border-cyan-400 bg-cyan-950/60 text-white transition flex items-center justify-between";
+
             const headerDot = document.getElementById('sim-header-dot');
-            const statusBox = document.getElementById('sim-status-box');
-            const kpiStatus = document.getElementById('sim-kpi-status');
-            const kpiPciTarget = document.getElementById('sim-kpi-pci-target');
-            const kpiPciMy = document.getElementById('sim-kpi-pci-my');
-            const mapCircle = document.getElementById('sim-map-circle');
-            const pulse1 = document.getElementById('sim-pulse-1');
-            const pulse2 = document.getElementById('sim-pulse-2');
-            const nodeCore = document.getElementById('sim-node-core');
-            const nodeLabel = document.getElementById('sim-node-label');
-            const markerTitle = document.getElementById('sim-marker-title');
+            const statusBox = document.getElementById('sim-kpi-status-box');
+            const statusText = document.getElementById('sim-kpi-status');
+            const radiusCircle = document.getElementById('sim-radius-circle');
+            const ripple1 = document.getElementById('sim-ripple-1');
+            const coreDot = document.getElementById('sim-core-dot');
+            const markerLabel = document.getElementById('sim-marker-label');
             const markerSub = document.getElementById('sim-marker-sub');
-            const rawSms = document.getElementById('sim-raw-sms');
             const logCard = document.getElementById('sim-log-card');
-            const cardBadge = document.getElementById('sim-card-badge');
-            const cardStatus = document.getElementById('sim-card-status');
-            const cardMeta = document.getElementById('sim-card-meta');
+            const logBadge = document.getElementById('sim-log-badge');
+            const logMeta = document.getElementById('sim-log-meta');
 
-            if (mode === 1) {
-                // 시나리오 1: 통신사별 PCI 및 기지국 문자 수신
-                btn1.className = "py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-cyan-500/20 border-[#00e5ff] text-white shadow-[0_0_12px_rgba(0,229,255,0.25)]";
-                headerDot.className = "w-2.5 h-2.5 rounded-full bg-[#00e676] shadow-[0_0_8px_#00e676] shrink-0";
-                statusBox.style.borderColor = "rgba(0, 230, 118, 0.35)";
-                kpiStatus.innerText = "🟢 켜짐 (18:00)";
-                kpiStatus.style.color = "#00e676";
-                kpiPciTarget.innerText = "타겟: 281";
-                kpiPciMy.innerHTML = "📡내폰:281(5G) (🎯일치!)";
-                kpiPciMy.style.color = "#00e676";
+            if (num === 1) {
+                headerDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#00e676]";
+                statusBox.className = "bg-[#0b1b29] rounded p-1.5 border border-emerald-500/30";
+                statusText.className = "text-[11px] font-extrabold text-emerald-400 mt-0.5 truncate";
+                statusText.innerText = "🟢 켜짐 (18:00)";
 
-                mapCircle.style.borderColor = "#00e676";
-                mapCircle.style.backgroundColor = "rgba(0, 230, 118, 0.12)";
-                pulse1.classList.remove('hidden');
-                pulse2.classList.remove('hidden');
-                nodeCore.style.backgroundColor = "#00e676";
-                nodeLabel.style.borderColor = "#00e676";
+                radiusCircle.className = "w-36 h-36 rounded-full border-2 border-dashed border-[#00e676] bg-[#00e676]/10 -translate-x-1/2 -translate-y-1/2 pointer-events-none";
+                ripple1.style.display = "block";
+                coreDot.className = "w-3.5 h-3.5 rounded-full bg-[#00e676] border-2 border-white shadow-[0_0_12px_#00e676] -translate-x-1/2 -translate-y-1/2 absolute left-1/2 top-1/2";
+                markerLabel.innerHTML = `
+                    <div><span class="text-cyan-300">📱5678</span> #2 활성 [PCI:281]</div>
+                    <div class="text-[9px] text-emerald-300 font-normal mt-0.5">🕒 확인: 11/18 18:00</div>
+                `;
 
-                markerTitle.innerHTML = `<span class="text-[#00e5ff]">📱5678</span> #2 활성 [PCI:281]`;
-                markerSub.innerHTML = `🕒 확인: 11/18 18:00`;
-                markerSub.className = "text-[9.5px] text-emerald-300 font-semibold mt-0.5";
+                logCard.className = "p-2.5 rounded-lg bg-[#0d1f30] border-l-4 border-emerald-400 text-xs space-y-1";
+                logBadge.className = "px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/40";
+                logBadge.innerText = "🟢 신호 활성";
+                logMeta.innerHTML = `기지국 PCI: <b class="text-cyan-300">281</b> | 확인일시: <b>11/18 18:00</b> | 상세이력(터치)`;
+            } else if (num === 2) {
+                headerDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#00e676]";
+                statusBox.className = "bg-[#0b1b29] rounded p-1.5 border border-emerald-500/30";
+                statusText.className = "text-[11px] font-extrabold text-emerald-400 mt-0.5 truncate";
+                statusText.innerText = "🟢 25분째 체류";
 
-                rawSms.innerText = "[281] 12345678 [1118-18:00] 위치확인 인천 계양구 계산새로 68";
-                logCard.style.borderLeftColor = "#00e676";
-                cardBadge.style.backgroundColor = "#00e676";
-                cardStatus.className = "px-2 py-0.5 rounded bg-emerald-500/20 text-[#00e676] font-bold text-[10px]";
-                cardStatus.innerText = "🟢 신호 활성";
-                cardMeta.innerHTML = `기지국 PCI: <b class="text-white">281</b> | 확인일시: <b class="text-white">11/18 18:00</b> | 상세이력 보기(터치)`;
-            } else if (mode === 2) {
-                // 시나리오 2: 동일 기지국 연속 체류 합산 (18:00 ~ 18:25)
-                btn2.className = "py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-emerald-500/20 border-[#00e676] text-white shadow-[0_0_12px_rgba(0,230,118,0.25)]";
-                headerDot.className = "w-2.5 h-2.5 rounded-full bg-[#00e676] shadow-[0_0_8px_#00e676] shrink-0";
-                statusBox.style.borderColor = "rgba(0, 230, 118, 0.5)";
-                kpiStatus.innerText = "🟢 25분째 체류 (18:25)";
-                kpiStatus.style.color = "#00e676";
-                kpiPciTarget.innerText = "타겟: 281";
-                kpiPciMy.innerHTML = "📡내폰:281(5G) (🎯일치!)";
+                radiusCircle.className = "w-36 h-36 rounded-full border-2 border-dashed border-[#00e676] bg-[#00e676]/10 -translate-x-1/2 -translate-y-1/2 pointer-events-none";
+                ripple1.style.display = "block";
+                coreDot.className = "w-3.5 h-3.5 rounded-full bg-[#00e676] border-2 border-white shadow-[0_0_12px_#00e676] -translate-x-1/2 -translate-y-1/2 absolute left-1/2 top-1/2";
+                markerLabel.innerHTML = `
+                    <div><span class="text-cyan-300">📱5678</span> #2 활성 [PCI:281]</div>
+                    <div class="text-[9px] text-emerald-300 font-normal mt-0.5">🕒 18:00 ~ 18:25 <span class="px-1 rounded bg-emerald-400 text-slate-950 font-bold">25분 체류중</span></div>
+                `;
 
-                mapCircle.style.borderColor = "#00e676";
-                mapCircle.style.backgroundColor = "rgba(0, 230, 118, 0.16)";
-                pulse1.classList.remove('hidden');
-                pulse2.classList.remove('hidden');
-                nodeCore.style.backgroundColor = "#00e676";
-                nodeLabel.style.borderColor = "#00e676";
+                logCard.className = "p-2.5 rounded-lg bg-[#0d1f30] border-l-4 border-emerald-400 text-xs space-y-1";
+                logBadge.className = "px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/40";
+                logBadge.innerText = "🟢 동일 기지국 25분간 체류 (4회 연속 수신)";
+                logMeta.innerHTML = `기지국 PCI: <b class="text-cyan-300">281</b> | 체류일시: <b>18:00 ~ 18:25 (25분)</b> | 상세이력(터치)`;
+            } else if (num === 3) {
+                headerDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_#ff1744]";
+                statusBox.className = "bg-[#241018] rounded p-1.5 border border-rose-500/50";
+                statusText.className = "text-[11px] font-extrabold text-amber-400 mt-0.5 truncate";
+                statusText.innerText = "⚫ 전원꺼짐 (14분 경과)";
 
-                markerTitle.innerHTML = `<span class="text-[#00e5ff]">📱5678</span> #2 활성 [PCI:281]`;
-                markerSub.innerHTML = `🕒 18:00 ~ 18:25 <span class="px-1 py-0.2 rounded bg-emerald-500/30 text-white font-bold">25분 체류중</span>`;
-                markerSub.className = "text-[9.5px] text-emerald-300 font-semibold mt-0.5";
+                radiusCircle.className = "w-36 h-36 rounded-full border-2 border-dashed border-rose-500 bg-rose-500/10 -translate-x-1/2 -translate-y-1/2 pointer-events-none";
+                ripple1.style.display = "none";
+                coreDot.className = "w-3.5 h-3.5 rounded-full bg-rose-500 border-2 border-white shadow-[0_0_12px_#ff1744] -translate-x-1/2 -translate-y-1/2 absolute left-1/2 top-1/2";
+                markerLabel.innerHTML = `
+                    <div><span class="text-cyan-300">📱5678</span> ⚫ #2 [PCI:281]</div>
+                    <div class="text-[9px] text-amber-300 font-normal mt-0.5">🕒 11/18 18:00 | ⚠️전원꺼짐(14분)</div>
+                `;
 
-                rawSms.innerText = "[281] 12345678 [1118-18:25] 위치확인 인천 계양구 계산새로 68 (6회 연속 수신)";
-                logCard.style.borderLeftColor = "#00e676";
-                cardBadge.style.backgroundColor = "#00e676";
-                cardStatus.className = "px-2 py-0.5 rounded bg-emerald-500/25 text-[#00e676] font-extrabold text-[10px]";
-                cardStatus.innerText = "🟢 동일 기지국 25분간 체류 (6회 연속 수신)";
-                cardMeta.innerHTML = `기지국 PCI: <b class="text-white">281</b> | 체류일시: <b class="text-white">11/18 18:00 ~ 18:25 (25분)</b> | 상세이력(터치)`;
-            } else if (mode === 3) {
-                // 시나리오 3: 단말기 전원 꺼짐(OFF) 감지
-                btn3.className = "py-2.5 px-3 rounded-xl text-xs font-extrabold border transition flex items-center justify-between sm:justify-center gap-1.5 bg-rose-500/20 border-[#ff5252] text-white shadow-[0_0_12px_rgba(255,82,82,0.25)]";
-                headerDot.className = "w-2.5 h-2.5 rounded-full bg-[#ff5252] shadow-[0_0_8px_#ff5252] shrink-0";
-                statusBox.style.borderColor = "rgba(255, 82, 82, 0.5)";
-                kpiStatus.innerText = "⚫ 전원꺼짐 (12분 경과)";
-                kpiStatus.style.color = "#ffab00";
-
-                mapCircle.style.borderColor = "#ff1744";
-                mapCircle.style.backgroundColor = "rgba(255, 23, 68, 0.12)";
-                pulse1.classList.add('hidden');
-                pulse2.classList.add('hidden');
-                nodeCore.style.backgroundColor = "#ff1744";
-                nodeLabel.style.borderColor = "#ff1744";
-
-                markerTitle.innerHTML = `<span class="text-[#00e5ff]">📱5678</span> ⚫ #2 [PCI:281]`;
-                markerSub.innerHTML = `🕒 11/18 18:00 | ⚠️전원꺼짐(12분 경과)`;
-                markerSub.className = "text-[9.5px] text-[#ffab00] font-bold mt-0.5";
-
-                rawSms.innerText = "[281] 12345678 [1118-18:00] 전원꺼짐 인천 계양구 계산새로 68";
-                logCard.style.borderLeftColor = "#ff1744";
-                cardBadge.style.backgroundColor = "#ff1744";
-                cardStatus.className = "px-2 py-0.5 rounded bg-rose-500/20 text-[#ffab00] font-extrabold text-[10px]";
-                cardStatus.innerText = "⚫ 전원 꺼짐 (12분째 꺼져 있음)";
-                cardMeta.innerHTML = `기지국 PCI: <b class="text-white">281</b> | 확인일시: <b class="text-white">11/18 18:00</b> | 상세이력 보기(터치)`;
+                logCard.className = "p-2.5 rounded-lg bg-[#211018] border-l-4 border-rose-500 text-xs space-y-1";
+                logBadge.className = "px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-amber-300 border border-rose-500/40";
+                logBadge.innerText = "⚫ 전원 꺼짐 (14분째 꺼져 있음)";
+                logMeta.innerHTML = `기지국 PCI: <b class="text-cyan-300">281</b> | 확인일시: <b>11/18 18:00</b> | 상세이력(터치)`;
             }
-        }
-
-        function copyFeedbackEmail() {
-            const email = "coool@police.go.kr";
-            const temp = document.createElement('textarea');
-            temp.value = email;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand('copy');
-            document.body.removeChild(temp);
-
-            const toast = document.getElementById('argus-toast');
-            const text = document.getElementById('argus-toast-text');
-            text.innerText = `📋 제보 전용 이메일(${email})이 복사되었습니다!`;
-            toast.classList.remove('hidden');
-            clearTimeout(window._argusToastTimer);
-            window._argusToastTimer = setTimeout(() => {
-                toast.classList.add('hidden');
-            }, 3000);
         }
     </script>
 </body>
