@@ -806,18 +806,48 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
         return;
     }
 
-    const cleanedTail = rawText.replace(/\r\n|\r|\n/g, ' ').replace(/\[Web발신\]/gi, '').trim();
-    if (pendingSktSplit && /^\d{1,2}\s*:\s*\d{2}\s*,\s*[YN]$/i.test(cleanedTail)) {
-        clearTimeout(pendingSktSplit.timer);
-        const mergedText = `${pendingSktSplit.rawText} ${cleanedTail}`;
-        const mergedSender = pendingSktSplit.senderNumber || senderNumber;
-        pendingSktSplit = null;
-        window.receiveSmsFromAndroid(mergedText, isManualInput, mergedSender);
+    // 1) SKT 분할 문자 2부(예: "[Web발신] 06:33, N") 도착 여부 확인
+    const tail = (typeof parseSktSplitTail === 'function') ? parseSktSplitTail(rawText) : null;
+    if (tail) {
+        // 1-A. 대기 중인 1부가 있으면 즉시 합쳐서 1건으로 처리
+        if (pendingSktSplit) {
+            clearTimeout(pendingSktSplit.timer);
+            const tailText = `${pad2(tail.hour)}:${pad2(tail.min)},${tail.isOffline ? 'N' : 'Y'}`;
+            const mergedText = `${pendingSktSplit.rawText} ${tailText}`;
+            const mergedSender = pendingSktSplit.senderNumber || senderNumber;
+            pendingSktSplit = null;
+            window.receiveSmsFromAndroid(mergedText, isManualInput, mergedSender);
+            return;
+        }
+        // 1-B. 3분 이내에 등록된 미완성 1부가 있으면 사후 보정
+        if (lastIncompleteSktRecord && (Date.now() - lastIncompleteSktRecord.createdAt < 180000)) {
+            applyRetroactiveSktTail(tail);
+            return;
+        }
+        // 1-C. 1부가 미완성으로 분류되지 않았더라도 직전 활성 마커가 있으면 바로 반영
+        if (lastActiveGroup && lastActiveGroup.currentStation) {
+            const st = lastActiveGroup.currentStation;
+            const lastVisit = st.visits[st.visits.length - 1];
+            const lastHistIdx = savedSignalsHistory.length - 1;
+            if (lastVisit) {
+                lastIncompleteSktRecord = {
+                    station: st,
+                    visit: lastVisit,
+                    historyIndex: lastHistIdx,
+                    group: lastActiveGroup,
+                    createdAt: Date.now()
+                };
+                applyRetroactiveSktTail(tail);
+                return;
+            }
+        }
+        sysLog(`⏳ [SKT 분할문자 2부] 연결할 직전 SKT 1부(주소) 문자가 없어 반영을 건너뛰었습니다.`, "#ffab00");
         return;
     }
 
     const parsed = parseSmsContent(rawText, senderNumber);
 
+    // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 3.5초 대기 후 병합/처리
     if (parsed.isIncompleteSkt && !isManualInput) {
         if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
         pendingSktSplit = {
@@ -827,7 +857,7 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
                 const hold = pendingSktSplit;
                 pendingSktSplit = null;
                 if (hold) dispatchParsedSignal(parseSmsContent(hold.rawText, hold.senderNumber));
-            }, 1500)
+            }, 3500)
         };
         return;
     }
