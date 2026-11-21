@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 실시간 PCI 및 통신망(알뜰폰) 안내 탑재] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 통신 3사 통합 파서 연동본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -31,6 +31,16 @@ let myCurrentNetType = "";
 const STORAGE_KEY_SIGNALS = 'CELL_TRACKER_SAVED_SIGNALS_V1';
 let savedSignalsHistory = [];
 let isRestoringHistory = false;
+
+// ★ HTML 특수문자 안전 치환 (XSS 방지)
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function sysLog(msg, color = '#00e676') {
     const box = document.getElementById('sys-console');
@@ -93,20 +103,20 @@ function renderMyPciOnDashboard() {
 
     const isMatch = (targetPci !== "-" && targetPci !== "미상" && String(targetPci) === String(myCurrentPci));
     const matchBadge = isMatch ? ` <span style="color:#00e676; font-weight:800;">(🎯일치!)</span>` : '';
-    const netLabel = myCurrentNetType ? `${myCurrentNetType}` : '';
+    const netLabel = myCurrentNetType ? `${escapeHtml(myCurrentNetType)}` : '';
 
     pciValEl.innerHTML = `
         <div style="line-height:1.15;">
-            <div>${targetPci !== "-" ? `타겟: ${targetPci}` : `타겟: -`}</div>
+            <div>${targetPci !== "-" ? `타겟: ${escapeHtml(targetPci)}` : `타겟: -`}</div>
             <div style="font-size:10.5px; color:${isMatch ? '#00e676' : '#ffd740'}; font-weight:700; margin-top:2px;">
-                📡내폰: ${myCurrentPci}${netLabel ? `(${netLabel})` : ''}${matchBadge}
+                📡내폰: ${escapeHtml(myCurrentPci)}${netLabel ? `(${netLabel})` : ''}${matchBadge}
             </div>
         </div>
     `;
 }
 
 function buildMyGpsMarkerHtml() {
-    const pciTag = myCurrentPci ? ` [PCI:${myCurrentPci}]` : '';
+    const pciTag = myCurrentPci ? ` [PCI:${escapeHtml(myCurrentPci)}]` : '';
     return `
         <div class="my-gps-node">
             <div class="my-gps-pulse"></div>
@@ -260,7 +270,7 @@ window.toggleMyLocationGps = function() {
             if (isFirstFix) {
                 isFirstFix = false;
                 kakaoMap.panTo(loc);
-                const pciInfo = myCurrentPci ? `, 현재 내 폰 PCI: ${myCurrentPci}` : '';
+                const pciInfo = myCurrentPci ? `, 현재 내 폰 PCI: ${escapeHtml(myCurrentPci)}` : '';
                 sysLog(`[내 위치 확인 완료] 현재 위치로 지도를 이동했습니다. (오차 약 ${Math.round(pos.coords.accuracy || 20)}m${pciInfo})`, "#00e676");
             }
         },
@@ -346,6 +356,10 @@ function restoreHistoryFromStorage() {
                 phone: item.phone,
                 address: item.address,
                 pci: item.pci,
+                carrier: item.carrier || '',
+                netType: item.netType || '',
+                cellType: item.cellType || '',
+                radius: item.radius || null,
                 dateObj: new Date(item.dateMs),
                 timeStr: item.timeStr,
                 isOffline: item.isOffline
@@ -507,7 +521,7 @@ function renderResetModalList() {
     const box = document.getElementById('reset-phone-list-box');
     box.innerHTML = phoneOrder.map(phone => {
         const g = phoneGroups[phone];
-        const displayPhone = formatPhoneDisplay(phone);
+        const displayPhone = escapeHtml(formatPhoneDisplay(phone));
         return `
             <div class="reset-phone-item" style="border-left-color:${g.color};">
                 <div class="reset-phone-info">
@@ -515,7 +529,7 @@ function renderResetModalList() {
                     <span>📱 ${displayPhone}</span>
                     <span style="font-size:11px; color:#8ab8cc; font-weight:normal;">(포착 기지국: ${g.stations.length}개소)</span>
                 </div>
-                <button class="btn btn-red" onclick="confirmAndClearSinglePhone('${phone}')">선택 삭제</button>
+                <button class="btn btn-red" onclick="confirmAndClearSinglePhone('${escapeHtml(phone)}')">선택 삭제</button>
             </div>
         `;
     }).join('');
@@ -549,7 +563,7 @@ window.confirmAndClearSinglePhone = function(phoneKey) {
             savedSignalsHistory = savedSignalsHistory.filter(item => item.phone !== phoneKey);
             saveHistoryToStorage();
 
-            sysLog(`[선택 초기화] 📱 ${displayPhone} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
+            sysLog(`[선택 초기화] 📱 ${escapeHtml(displayPhone)} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
 
             if (phoneOrder.length === 0) {
                 resetDashboardToEmpty();
@@ -771,7 +785,7 @@ function syncMapLayersVisibility() {
 function maskSmsForDebug(raw) {
     let masked = raw.replace(/\d/g, '#');
     masked = masked.replace(/[가-힣]+/g, function(word) {
-        if (/^(Web발신|위치확인|전원꺼짐|전원|꺼짐|켜짐|정상|착신전환|통화불가|기지국|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|특별자치시|특별자치도|광역시)$/.test(word)) {
+        if (/^(Web발신|발신기지국|위치자료|위치확인|전원꺼짐|전원|꺼짐|음영|켜짐|정상|착신전환|통화불가|기지국|중계기|일반|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|특별자치시|특별자치도|광역시)$/.test(word)) {
             return word;
         }
         if (/(시|도|군|구|읍|면|동|리|로|길|가|번지)$/.test(word)) {
@@ -782,67 +796,123 @@ function maskSmsForDebug(raw) {
     return masked;
 }
 
-window.receiveSmsFromAndroid = function(rawText, isManualInput = false) {
+// SKT 타사 회신 시 2건으로 분할 수신되는 문자 자동 병합 버퍼
+let pendingSktSplit = null;
+
+window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNumber = '') {
     if (!rawText || !rawText.trim()) return;
     if (!kakaoMap) {
         showAppAlert("지도가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "⏳ 지도 로딩 중");
         return;
     }
 
-    const parsed = parseSmsContent(rawText);
+    // 1) SKT 분할 문자 2부(예: "[Web발신]\n06:33,N")가 뒤이어 도착한 경우 1부와 자동 병합
+    const cleanedTail = rawText.replace(/\r\n|\r|\n/g, ' ').replace(/\[Web발신\]/gi, '').trim();
+    if (pendingSktSplit && /^\d{1,2}\s*:\s*\d{2}\s*,\s*[YN]$/i.test(cleanedTail)) {
+        clearTimeout(pendingSktSplit.timer);
+        const mergedText = `${pendingSktSplit.rawText} ${cleanedTail}`;
+        const mergedSender = pendingSktSplit.senderNumber || senderNumber;
+        pendingSktSplit = null;
+        window.receiveSmsFromAndroid(mergedText, isManualInput, mergedSender);
+        return;
+    }
 
-    if (!parsed.address) {
-        const hasCellHint = /(PCI|CPI|기지국|위치확인|\[\s*\d{1,4}\s*\])/i.test(rawText);
+    const parsed = parseSmsContent(rawText, senderNumber);
+
+    // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 1.5초 대기 후 병합/처리
+    if (parsed.isIncompleteSkt && !isManualInput) {
+        if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
+        pendingSktSplit = {
+            rawText,
+            senderNumber,
+            timer: setTimeout(function() {
+                const hold = pendingSktSplit;
+                pendingSktSplit = null;
+                if (hold) dispatchParsedSignal(parseSmsContent(hold.rawText, hold.senderNumber));
+            }, 1500)
+        };
+        return;
+    }
+
+    if (!parsed.address && !(parsed.directLat && parsed.directLng)) {
+        const hasCellHint = /(PCI|CPI|기지국|발신기지국|위치자료|위치확인|tmap|중계기|음영|\br\(\d+|D:\s*\d{4}|[CP]:\s*\d{4,5}|\[\s*[a-zA-Z]?\d{1,4}\s*\])/i.test(rawText);
 
         if (isManualInput || hasCellHint) {
-            const debugPattern = maskSmsForDebug(rawText);
+            const debugPattern = escapeHtml(maskSmsForDebug(rawText));
             sysLog(`⚠️ [양식 미인식 디버그] 주소 추출 실패 | 양식구조: "${debugPattern}" (개인정보 자동보호됨)`, "#ff1744");
         }
         return;
     }
 
-    const dispPhone = formatPhoneDisplay(parsed.phone);
-    sysLog(`📡 [기지국 신호 포착] 📱${dispPhone} | PCI:${parsed.pci} | ${parsed.address}`, "#00e5ff");
-
-    geocodeOnKakao(parsed);
+    dispatchParsedSignal(parsed);
 };
 
-function geocodeOnKakao(parsed) {
-    const { address } = parsed;
-    kakaoGeocoder.addressSearch(address, function(result, status) {
-        if (status === kakao.maps.services.Status.OK && result.length > 0) {
-            processLocationSignal(parseFloat(result[0].y), parseFloat(result[0].x), parsed);
-            return;
-        }
+function dispatchParsedSignal(parsed) {
+    const dispPhone = escapeHtml(formatPhoneDisplay(parsed.phone));
+    const carrierTag = [parsed.carrier, parsed.netType, parsed.cellType].filter(Boolean).join('·');
+    const radiusTag = parsed.radius ? ` | 반경:${parsed.radius}m` : '';
+    const safeAddr = escapeHtml(parsed.address || '좌표 직결 위치');
 
-        kakaoPlaces.keywordSearch(address, function(kwRes, kwStatus) {
-            if (kwStatus === kakao.maps.services.Status.OK && kwRes.length > 0) {
-                processLocationSignal(parseFloat(kwRes[0].y), parseFloat(kwRes[0].x), parsed);
+    // SKT T-map 측위 좌표가 있으면 지오코딩 없이 바로 정밀 마커 표시
+    if (parsed.directLat && parsed.directLng) {
+        sysLog(`📡 [${escapeHtml(carrierTag)} 측위직결] 📱${dispPhone} | PCI:${escapeHtml(parsed.pci)} | ${safeAddr}`, "#00e5ff");
+        processLocationSignal(parsed.directLat, parsed.directLng, parsed);
+        return;
+    }
+
+    sysLog(`📡 [${escapeHtml(carrierTag)} 신호포착] 📱${dispPhone} | PCI:${escapeHtml(parsed.pci)}${radiusTag} | ${safeAddr}`, "#00e5ff");
+    geocodeOnKakao(parsed);
+}
+
+function geocodeOnKakao(parsed) {
+    const primaryQuery = parsed.searchAddress || parsed.address;
+    const fallbackQuery = parsed.fallbackAddress || '';
+
+    function trySearch(query, onFail) {
+        kakaoGeocoder.addressSearch(query, function(result, status) {
+            if (status === kakao.maps.services.Status.OK && result.length > 0) {
+                processLocationSignal(parseFloat(result[0].y), parseFloat(result[0].x), parsed);
                 return;
             }
-
-            const roadOnly = address.replace(/\s+(산\s*)?\d+(-\d+)?(\s*번지)?$/, '').trim();
-            if (roadOnly && roadOnly !== address) {
-                sysLog(`[${address}] 정식 건물번호 없음 -> [${roadOnly}] 구간으로 보정 추적합니다.`, "#ffab00");
-                kakaoGeocoder.addressSearch(roadOnly, function(rRes, rStatus) {
-                    if (rStatus === kakao.maps.services.Status.OK && rRes.length > 0) {
-                        parsed.address = `${address} (도로보정)`;
-                        processLocationSignal(parseFloat(rRes[0].y), parseFloat(rRes[0].x), parsed);
-                    } else {
-                        kakaoPlaces.keywordSearch(roadOnly, function(rkRes, rkStatus) {
-                            if (rkStatus === kakao.maps.services.Status.OK && rkRes.length > 0) {
-                                parsed.address = `${address} (인근보정)`;
-                                processLocationSignal(parseFloat(rkRes[0].y), parseFloat(rkRes[0].x), parsed);
-                            } else {
-                                sysLog(`주소 변환 실패: [${address}]`, "#ff1744");
-                            }
-                        });
-                    }
-                });
-            } else {
-                sysLog(`주소 변환 실패: [${address}]`, "#ff1744");
-            }
+            kakaoPlaces.keywordSearch(query, function(kwRes, kwStatus) {
+                if (kwStatus === kakao.maps.services.Status.OK && kwRes.length > 0) {
+                    processLocationSignal(parseFloat(kwRes[0].y), parseFloat(kwRes[0].x), parsed);
+                    return;
+                }
+                const roadOnly = query.replace(/\s+(산\s*)?\d+(-\d+)?(\s*번지)?$/, '').trim();
+                if (roadOnly && roadOnly !== query) {
+                    sysLog(`[${escapeHtml(query)}] 정식 번지 없음 -> [${escapeHtml(roadOnly)}] 구간으로 보정 추적합니다.`, "#ffab00");
+                    kakaoGeocoder.addressSearch(roadOnly, function(rRes, rStatus) {
+                        if (rStatus === kakao.maps.services.Status.OK && rRes.length > 0) {
+                            parsed.address = `${parsed.address} (구간보정)`;
+                            processLocationSignal(parseFloat(rRes[0].y), parseFloat(rRes[0].x), parsed);
+                        } else {
+                            kakaoPlaces.keywordSearch(roadOnly, function(rkRes, rkStatus) {
+                                if (rkStatus === kakao.maps.services.Status.OK && rkRes.length > 0) {
+                                    parsed.address = `${parsed.address} (인근보정)`;
+                                    processLocationSignal(parseFloat(rkRes[0].y), parseFloat(rkRes[0].x), parsed);
+                                } else {
+                                    onFail();
+                                }
+                            });
+                        }
+                    });
+                } else {
+                    onFail();
+                }
+            });
         });
+    }
+
+    trySearch(primaryQuery, function() {
+        if (fallbackQuery && fallbackQuery !== primaryQuery) {
+            sysLog(`[위치자료] 주소 검색 실패 -> [발신기지국] 주소(${escapeHtml(fallbackQuery)})로 대체 추적합니다.`, "#ffab00");
+            trySearch(fallbackQuery, function() {
+                sysLog(`주소 변환 실패: [${escapeHtml(primaryQuery)}]`, "#ff1744");
+            });
+        } else {
+            sysLog(`주소 변환 실패: [${escapeHtml(primaryQuery)}]`, "#ff1744");
+        }
     });
 }
 
@@ -884,6 +954,10 @@ function processLocationSignal(lat, lng, parsed) {
         phone: phone,
         address: address,
         pci: pci,
+        carrier: parsed.carrier || '',
+        netType: parsed.netType || '',
+        cellType: parsed.cellType || '',
+        radius: parsed.radius || null,
         dateMs: eventDate ? eventDate.getTime() : Date.now(),
         timeStr: timeStr,
         isOffline: isOffline
@@ -911,7 +985,7 @@ function processLocationSignal(lat, lng, parsed) {
                 badgeEl.innerText = `⚫ 전원 재부팅됨 (총 ${offDurationStr}간 꺼져 있었음: ${prevVisit.startTimeStr} ~ ${timeStr})`;
             }
             if (!isRestoringHistory) {
-                sysLog(`[전원 재부팅 / 위치변경] ${formatPhoneDisplay(phone)} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
+                sysLog(`[전원 재부팅 / 위치변경] ${escapeHtml(formatPhoneDisplay(phone))} 단말기 전원 꺼짐 종료 (총 ${offDurationStr}간 오프라인 기록됨)`, "#ffab00");
             }
         }
 
@@ -968,15 +1042,19 @@ function processLocationSignal(lat, lng, parsed) {
         station.overlay.setContent(buildStationMarkerHtml(station, true));
         group.currentStation = station;
         if (!isRestoringHistory) {
-            sysLog(`[재방문 감지] ${formatPhoneDisplay(phone)} -> #${station.seq} 기지국(PCI:${pci}) ${station.visits.length}번째 방문!`, "#ffab00");
+            sysLog(`[재방문 감지] ${escapeHtml(formatPhoneDisplay(phone))} -> #${station.seq} 기지국(PCI:${escapeHtml(pci)}) ${station.visits.length}번째 방문!`, "#ffab00");
         }
     } else {
         stationUidCounter++;
         const seq = group.stations.length + 1;
+        const circleRadius = parsed.radius
+            ? Math.min(Math.max(parsed.radius, 50), 2500)
+            : 400;
+
         const circle = new kakao.maps.Circle({
             map: (group.visible && showRadius) ? kakaoMap : null,
             center: pos,
-            radius: 400,
+            radius: circleRadius,
             strokeWeight: 2,
             strokeColor: isOffline ? '#ff1744' : group.color,
             strokeOpacity: 0.85,
@@ -1026,7 +1104,7 @@ function processLocationSignal(lat, lng, parsed) {
 
 function getShortPhoneLabel(phone) {
     if (phone === "번호미상") return "";
-    return `<span class="phone-mini">📱${formatPhoneDisplay(phone)}</span>`;
+    return `<span class="phone-mini">📱${escapeHtml(formatPhoneDisplay(phone))}</span>`;
 }
 
 function buildStationMarkerHtml(st, isCurrentActive) {
@@ -1034,6 +1112,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
     const totalVisits = st.visits.length;
     const revisitTag = totalVisits > 1 ? `<span class="revisit-badge">${totalVisits}회 방문</span>` : '';
     const phoneBadge = getShortPhoneLabel(st.phone);
+    const safePci = escapeHtml(st.pci);
 
     if (isCurrentActive) {
         if (lastVisit.isOffline) {
@@ -1042,7 +1121,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
                 <div class="tactical-node offline" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
                     <div class="node-core"></div>
                     <div class="node-label">
-                        ${phoneBadge}⚫ #${st.seq} [PCI:${st.pci}] ${revisitTag}
+                        ${phoneBadge}⚫ #${st.seq} [PCI:${safePci}] ${revisitTag}
                         <span class="sub-time">🕒${lastVisit.startTimeStr} | ⚠️전원꺼짐(${elapsedStr})</span>
                     </div>
                 </div>
@@ -1060,7 +1139,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
                     <div class="ripple-ring delay-2"></div>
                     <div class="node-core"></div>
                     <div class="node-label">
-                        ${phoneBadge}#${st.seq} 활성 [PCI:${st.pci}] ${revisitTag}
+                        ${phoneBadge}#${st.seq} 활성 [PCI:${safePci}] ${revisitTag}
                         <span class="sub-time">${stayText}</span>
                     </div>
                 </div>
@@ -1070,14 +1149,14 @@ function buildStationMarkerHtml(st, isCurrentActive) {
 
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
-    const miniPciText = st.pci !== '미상' ? `PCI:${st.pci}` : `#${st.seq}`;
+    const miniPciText = st.pci !== '미상' ? `PCI:${safePci}` : `#${st.seq}`;
 
     return `
         <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
             <div class="node-core"></div>
             <div class="node-mini-badge">${miniPciText}</div>
             <div class="node-label">
-                ${phoneBadge}#${st.seq} [PCI:${st.pci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
+                ${phoneBadge}#${st.seq} [PCI:${safePci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
             </div>
         </div>
     `;
@@ -1099,13 +1178,14 @@ function renderPhoneFilterBar() {
         const isSel = (selectedPhoneFilter === phone) ? 'selected' : '';
         const isHidden = !g.visible ? 'hidden-on-map' : '';
         const eyeIcon = g.visible ? '👁️켜짐' : '🚫꺼짐';
-        const displayPhone = formatPhoneDisplay(phone);
+        const displayPhone = escapeHtml(formatPhoneDisplay(phone));
+        const safePhoneKey = escapeHtml(phone);
 
         html += `
-            <div class="phone-chip ${isSel} ${isHidden}" style="border-color:${g.color};" onclick="selectPhoneFilter('${phone}')">
+            <div class="phone-chip ${isSel} ${isHidden}" style="border-color:${g.color};" onclick="selectPhoneFilter('${safePhoneKey}')">
                 <span class="phone-color-dot" style="background:${g.color};"></span>
                 <span>${displayPhone} (${g.stations.length})</span>
-                <button class="phone-vis-btn" onclick="event.stopPropagation(); togglePhoneVisibility('${phone}');" title="지도에서 이 번호만 켜기/끄기">${eyeIcon}</button>
+                <button class="phone-vis-btn" onclick="event.stopPropagation(); togglePhoneVisibility('${safePhoneKey}');" title="지도에서 이 번호만 켜기/끄기">${eyeIcon}</button>
             </div>
         `;
     });
@@ -1131,7 +1211,7 @@ window.togglePhoneVisibility = function(phoneKey) {
     g.visible = !g.visible;
     syncMapLayersVisibility();
     renderPhoneFilterBar();
-    sysLog(`[표시 제어] ${formatPhoneDisplay(phoneKey)} 동선 및 마커 ${g.visible ? '표시(ON)' : '숨김(OFF)'}`, "#00e5ff");
+    sysLog(`[표시 제어] ${escapeHtml(formatPhoneDisplay(phoneKey))} 동선 및 마커 ${g.visible ? '표시(ON)' : '숨김(OFF)'}`, "#00e5ff");
 };
 
 function filterLogCardsByPhone() {
@@ -1275,7 +1355,9 @@ function createNewLogCard(st, visit) {
         : `<span class="t-status-tag on" id="log-status-${visit.logCardId}">🟢 신호 활성</span>`;
 
     const revisitNotice = st.visits.length > 1 ? ` <b style="color:#ffab00;">[${st.visits.length}차 방문]</b>` : '';
-    const displayPhone = formatPhoneDisplay(st.phone);
+    const displayPhone = escapeHtml(formatPhoneDisplay(st.phone));
+    const safeAddr = escapeHtml(st.address);
+    const safePci = escapeHtml(st.pci);
 
     card.innerHTML = `
         <div style="cursor:pointer; width:100%;" onclick="kakaoMap.panTo(new kakao.maps.LatLng(${st.lat}, ${st.lng})); openHistoryModal(${st.stationUid});">
@@ -1283,10 +1365,10 @@ function createNewLogCard(st, visit) {
                 <span class="t-phone-tag" style="background:${st.color};">📱 ${displayPhone}</span>
                 <span class="t-badge" style="background:${ visit.isOffline ? '#ff1744' : st.color };">기지국 #${st.seq}</span>
                 ${statusBadge}
-                <span class="t-addr">${st.address}${revisitNotice}</span>
+                <span class="t-addr">${safeAddr}${revisitNotice}</span>
             </div>
             <div class="t-meta" id="log-meta-${visit.logCardId}">
-                기지국 PCI: <b>${st.pci}</b> | 확인일시: <b>${visit.startTimeStr}</b> | 상세이력 보기(터치)
+                기지국 PCI: <b>${safePci}</b> | 확인일시: <b>${visit.startTimeStr}</b> | 상세이력 보기(터치)
             </div>
         </div>
         <div class="t-links">
@@ -1301,6 +1383,7 @@ function createNewLogCard(st, visit) {
 function updateExistingLogCard(st, visit) {
     const statusEl = document.getElementById(`log-status-${visit.logCardId}`);
     const metaEl = document.getElementById(`log-meta-${visit.logCardId}`);
+    const safePci = escapeHtml(st.pci);
 
     if (!visit.isOffline) {
         const stayStr = formatDurationMin(visit.startDate, visit.endDate);
@@ -1308,10 +1391,10 @@ function updateExistingLogCard(st, visit) {
             statusEl.innerText = `🟢 동일 기지국 ${stayStr}간 체류 (${visit.count}회 연속 수신)`;
         }
         if (metaEl) {
-            metaEl.innerHTML = `기지국 PCI: <b>${st.pci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
+            metaEl.innerHTML = `기지국 PCI: <b>${safePci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
         }
         if (!isRestoringHistory) {
-            sysLog(`[동일 PCI 연속수신] ${formatPhoneDisplay(st.phone)} #${st.seq}(PCI:${st.pci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+            sysLog(`[동일 PCI 연속수신] ${escapeHtml(formatPhoneDisplay(st.phone))} #${st.seq}(PCI:${safePci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
         }
     } else {
         const elapsed = formatDurationMin(visit.startDate, new Date());
@@ -1488,6 +1571,7 @@ function playTacticalBeep(isOffline) {
         }
     });
 })();
+
 // =====================================================================
 // ★ [익명 사용자 수 집계 & 제작자 전용 숨김 통계 팝업 모듈 - 3초 롱프레스 적용]
 // =====================================================================
@@ -1514,7 +1598,6 @@ function playTacticalBeep(isOffline) {
         const verBadge = document.getElementById('header-ver-badge');
         if (!verBadge) return;
 
-        // 모바일에서 3초간 누를 때 글자 선택이나 복사 메뉴가 뜨지 않도록 방지
         verBadge.style.userSelect = 'none';
         verBadge.style.webkitUserSelect = 'none';
         verBadge.addEventListener('contextmenu', e => e.preventDefault());
@@ -1528,7 +1611,7 @@ function playTacticalBeep(isOffline) {
             pressTimer = setTimeout(function() {
                 isLongPressTriggered = true;
                 openCreatorStatsModal();
-            }, 3000); // ★ 3초(3000ms) 동안 떼지 않고 꾹 눌러야 작동
+            }, 3000);
         };
 
         const cancelPress = function() {
@@ -1538,7 +1621,6 @@ function playTacticalBeep(isOffline) {
             }
         };
 
-        // 3초 롱프레스가 발동된 직후 손가락을 뗄 때, 기본 클릭(업데이트 내역 모달)이 실행되어 창이 덮이는 현상 차단
         verBadge.addEventListener('click', function(e) {
             if (isLongPressTriggered) {
                 e.stopImmediatePropagation();
