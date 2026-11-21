@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 - 과거 측위 지점 슬림화(점+동선) 적용본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - 측위 과거 점/경로 흐림·슬림화 적용본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -76,7 +76,7 @@ window.showPciGuideAlert = function() {
         "  - SKT / KT / LGU+ 및 각 망 알뜰폰 ➔ 동일 PCI 표시\n\n" +
         "3. SKT [위치자료]와 [발신기지국] 표시 기준\n" +
         "• SKT 문자에 [위치자료](T-map 측위 좌표)가 포함된 경우, 안테나 위치인 [발신기지국]보다 정확한 단말기 추정 위치인 [위치자료]를 기준으로 지도에 '📍측위' 마커가 표시됩니다.\n" +
-        "• 지나온 과거 측위 지점은 지도가 복잡해지지 않도록 작은 점(●)과 이동 동선으로만 간결하게 표시되며, 점을 터치하면 상세 이력을 확인할 수 있습니다.";
+        "• 지나온 과거 측위 지점은 지도가 복잡해지지 않도록 흐린 작은 점(●)과 얇은 회색 동선으로만 간결하게 표시되며, 점을 터치하면 상세 이력을 확인할 수 있습니다.";
 
     showAppAlert(msg, "📡 실시간 PCI 및 위치 표시 안내");
 };
@@ -389,7 +389,7 @@ window.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    sysLog(`📍 [SKT 측위 안내] SKT 문자에 [위치자료](T-map 좌표)가 포함된 경우 [발신기지국] 대신 단말기 추정 위치인 [위치자료] 기준으로 표시되며, 지나온 측위 지점은 작은 점(●)과 동선으로만 간결히 표시됩니다.`, "#00e5ff");
+    sysLog(`📍 [SKT 측위 안내] SKT 문자에 [위치자료](T-map 좌표)가 포함된 경우 [발신기지국] 대신 단말기 추정 위치인 [위치자료] 기준으로 표시되며, 지나온 측위 지점은 흐린 작은 점(●)과 얇은 회색 동선으로 간결히 표시됩니다.`, "#00e5ff");
     sysLog(`💡 [PCI 비교 안내] 실시간 내폰 PCI는 별정통신사(알뜰폰) 여부와 무관하게 실제 사용하는 통신망(SKT망·KT망·LGU+망)이 타겟과 같을 때 동일한 PCI 값으로 표시됩니다. (상단 '최근 PCI ⓘ' 터치 시 상세안내)`, "#ffd740");
     sysLog(`🔒 [보안 작동 중] 기지국 위치추적 외 개인 문자·카톡은 절대 수집/기록하지 않으며 모든 데이터는 기기 내부에만 보관됩니다.`, "#8ab8cc");
     sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
@@ -775,7 +775,6 @@ function syncMapLayersVisibility() {
             const isCurr = (group.currentStation === st);
             if (st.overlay) st.overlay.setMap(isGroupVis ? kakaoMap : null);
             if (st.circle) {
-                // 과거 측위 지점은 반경 원 숨김 (최신 활성 지점만 표시)
                 const shouldShowCircle = isGroupVis && showRadius && (!st.isEstimatedPos || isCurr);
                 st.circle.setMap(shouldShowCircle ? kakaoMap : null);
             }
@@ -1117,6 +1116,16 @@ function processLocationSignal(lat, lng, parsed) {
         allStationsMap[station.stationUid] = station;
     }
 
+    // ★ 측위(위치자료) 이동 동선은 얇고 흐린 회색 점선으로 표시
+    if (isEstimatedPos) {
+        group.polyline.setOptions({
+            strokeWeight: 2,
+            strokeColor: '#7b8794',
+            strokeOpacity: 0.45,
+            strokeStyle: 'shortdash'
+        });
+    }
+
     group.routeCoords.push({ lat, lng });
     group.polyline.setPath(group.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
     group.polyline.setMap((group.visible && showRoute) ? kakaoMap : null);
@@ -1174,11 +1183,11 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
-    // ★ 과거 측위(SKT 위치자료) 지점은 반경 원·라벨 없이 깔끔한 작은 점(●)으로만 표시
+    // ★ 과거 측위(SKT 위치자료) 지점은 반경 원·라벨 없이 흐리고 작은 점(●)으로만 표시
     if (st.isEstimatedPos) {
         return `
             <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})" title="#${st.seq} 측위 (${lastVisit.endTimeStr})">
-                <div class="node-core" style="width:10px; height:10px; opacity:0.85;"></div>
+                <div class="node-core" style="width:8px; height:8px; opacity:0.35; border-width:1.5px; box-shadow:none;"></div>
             </div>
         `;
     }
@@ -1585,8 +1594,8 @@ function playTacticalBeep(isOffline) {
                     if (rect.width === 0 || rect.height === 0) continue;
 
                     if (
-                        e.clientX >= rect.left - 6 && e.clientX <= rect.right + 6 &&
-                        e.clientY >= rect.top - 6 && e.clientY <= rect.bottom + 6
+                        e.clientX >= rect.left - 8 && e.clientX <= rect.right + 8 &&
+                        e.clientY >= rect.top - 8 && e.clientY <= rect.bottom + 8
                     ) {
                         node.click();
                         return;
