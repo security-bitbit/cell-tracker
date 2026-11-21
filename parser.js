@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) SKT / KT / LGU+ 실시간 위치추적 문자 통합 파서 v2.2] ★
+// ★ [아르고스(ARGUS) SKT / KT / LGU+ 실시간 위치추적 문자 통합 파서 v2.3] ★
 // - SKT: [위치자료](측위)/[발신기지국] 분리, T-map 좌표 직결, 5G 'i' 제거,
 //        타사 회신 무공백 주소 복원, 분할 문자 2부(06:33,N) 파싱, 020/010 인식
 // - KT : 3G/4G/5G, L(PCI)/g(PN), r(반경), D:일시, C(켜짐)/P(꺼짐):뒷5자리
@@ -8,8 +8,9 @@
 
 function parseSmsContent(rawText, senderNumber = '') {
     const text = String(rawText || '')
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
         .replace(/\r\n|\r|\n/g, ' ')
-        .replace(/\[Web발신\]/gi, ' ')
+        .replace(/[\[\(]\s*(?:Web|웹)\s*발신\s*[\]\)]/gi, ' ')
         .replace(/제목\s*:\s*(?:CSMS|[^\s]{1,12})?/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -32,14 +33,14 @@ function parseSmsContent(rawText, senderNumber = '') {
 // 예: "[Web발신]\n06:33,N" | "[Web 발신] 06:33, N" | "05-28 06:33,Y"
 function parseSktSplitTail(rawText) {
     const cleaned = String(rawText || '')
-        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ') // 보이지 않는 공백 제거
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
         .replace(/\r\n|\r|\n/g, ' ')
         .replace(/[\[\(]\s*(?:Web|웹)\s*발신\s*[\]\)]/gi, ' ')
         .replace(/제목\s*:\s*(?:CSMS|[^\s]{1,12})?/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
-    const m = cleaned.match(/^(?:(\d{2})-(\d{2})\s+)?(\d{1,2})\s*:\s*(\d{2})\s*,\s*([YN])$/i);
+    const m = cleaned.match(/^,?\s*(?:(\d{2})-(\d{2})\s+)?(\d{1,2})\s*:\s*(\d{2})\s*,\s*([YN])$/i);
     if (!m) return null;
 
     return {
@@ -90,7 +91,7 @@ function parseSktSms(text, senderNumber) {
     const result = createEmptyParsedResult();
     result.carrier = 'SKT';
 
-    // 1) 전화번호 추출: 발신번호(020 + 8자리 또는 테스트용 010/01x + 7~8자리) 및 본문 내 020/010 지원
+    // 1) 전화번호 추출 (020 + 테스트용 010/01x)
     let senderDigits = String(senderNumber || '').replace(/\D/g, '');
     if (senderDigits.startsWith('82') && senderDigits.length >= 11) {
         senderDigits = '0' + senderDigits.slice(2);
@@ -154,7 +155,6 @@ function parseSktSms(text, senderNumber) {
         result.timeStr = `${pad2(month + 1)}/${pad2(day)} ${pad2(hour)}:${pad2(min)}`;
         result.isOffline = (fullDtStatus[5].toUpperCase() === 'N');
     } else if (splitDateOnly) {
-        // 타사 회신 분할 문자 1부 (시간·Y/N이 다음 문자로 따로 오는 경우)
         const month = parseInt(splitDateOnly[1], 10) - 1;
         const day = parseInt(splitDateOnly[2], 10);
         result.dateObj = new Date(now.getFullYear(), month, day, now.getHours(), now.getMinutes(), 0);
@@ -184,7 +184,6 @@ function parseSktSms(text, senderNumber) {
         stationPart = text.replace(/^\[\s*\d{1,2}\s*,\s*\d{1,2}\s*:\s*\d{2}\s*\]\s*/, '').trim();
     }
 
-    // 테스트용으로 본문 맨 앞에 010/020 번호를 적어 넣은 경우 주소에서 제외
     stationPart = stationPart.replace(/^(?:020|01[016789])[-\s.]?\d{3,4}[-\s.]?\d{4}\s*/, '').trim();
 
     const cutRegex = /(?:[,\s]+(?:0\s*,\s*)?\d{1,4}\s*\([^)]+\)|[,\s]+[a-zA-Z]\s*\(\s*\d{1,4}\s*\)|,\s*\d{1,4}\s*,\s*\d{2}-?\d{2}|,\s*\d{2}-?\d{2}\s+\d{1,2}\s*:\s*\d{2}|\[위치자료\])/;
@@ -195,7 +194,7 @@ function parseSktSms(text, senderNumber) {
         stationRawAddr = stationPart.trim();
     }
 
-    // ★ SKT 5G 표시(주소 맨 끝 소문자 'i') 안전 감지 및 제거 (영단어 끝 i는 보호)
+    // SKT 5G 표시(주소 맨 끝 소문자 'i') 안전 감지 및 제거
     if (/(^|[^A-Za-z])i$/.test(stationRawAddr)) {
         result.netType = '5G';
         stationRawAddr = stationRawAddr.replace(/(^|[^A-Za-z])i$/, '$1').trim();
@@ -454,27 +453,20 @@ function cleanAddressAndDetail(rawAddr) {
         detail = `${nearMatch[2].trim()} 부근`;
     }
 
-    // 1) 시/도 분리
     s = s.replace(
         /^(서울특별시|서울시|서울|부산광역시|부산시|부산|대구광역시|대구시|대구|인천광역시|인천시|인천|광주광역시|광주시|광주|대전광역시|대전시|대전|울산광역시|울산시|울산|세종특별자치시|세종시|세종|경기도|경기|강원특별자치도|강원도|강원|충청북도|충북|충청남도|충남|전북특별자치도|전라북도|전북|전라남도|전남|경상북도|경북|경상남도|경남|제주특별자치도|제주도|제주)(?=[가-힣])/,
         '$1 '
     );
-    // 2) 시/군/구 분리 (최대 2단계)
     for (let i = 0; i < 2; i++) {
         s = s.replace(
             /^((?:[가-힣]+\s+){1,2})([가-힣]{1,4}(?:시|군|구))(?=[가-힣]{2,})/,
             '$1$2 '
         );
     }
-    // 3) 동·가·읍·면·리 뒤 번지 숫자 분리
     s = s.replace(/([가-힣]+(?:동\d*가?|읍|면|리|가))(?=(?:산\s*)?\d+(?!\s*(?:대로|로|번길|길)))/g, '$1 ');
-    // 4) 도로명(대로·로·번길·길) 뒤 건물번호 분리 (원효로1가, 테헤란로23번길 보호)
     s = s.replace(/([가-힣0-9]+?(?:대로|번길|로|길))(?=(?:산\s*)?\d+(?!\s*(?:가\b|번?길|대로|로)))/g, '$1 ');
-
-    // 5) 지번 부번 '-0' 제거
     s = s.replace(/(\d+)-0(?=\s*번지|\s|$)/g, '$1');
 
-    // 6) '번지' 또는 번호 뒤 건물명/상호명 분리
     const bunjiSplit = s.match(/^(.+?(?:산\s*)?\d+(?:-\d+)?)\s*번지\s*(.*)$/);
     if (bunjiSplit) {
         s = bunjiSplit[1].trim();

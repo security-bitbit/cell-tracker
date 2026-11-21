@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 - 측위 과거 점/경로 흐림·슬림화 적용본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - SKT 분할문자 병합/사후보정 & 측위 슬림화 최종본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -29,6 +29,9 @@ let myCurrentNetType = "";
 const STORAGE_KEY_SIGNALS = 'CELL_TRACKER_SAVED_SIGNALS_V1';
 let savedSignalsHistory = [];
 let isRestoringHistory = false;
+
+let pendingSktSplit = null;
+let lastIncompleteSktRecord = null;
 
 function escapeHtml(str) {
     return String(str || '')
@@ -607,6 +610,7 @@ window.confirmAndClearAll = function() {
             stationUidCounter = 0;
             logSeqCounter = 0;
             lastActiveGroup = null;
+            lastIncompleteSktRecord = null;
 
             savedSignalsHistory = [];
             try { localStorage.removeItem(STORAGE_KEY_SIGNALS); } catch (e) {}
@@ -782,7 +786,7 @@ function syncMapLayersVisibility() {
     });
 }
 
-// ===== 안드로이드 수신 브릿지 및 사생활 보호 마스킹 디버거 =====
+// ===== 안드로이드 수신 브릿지 및 SKT 분할문자 병합/사후보정 =====
 function maskSmsForDebug(raw) {
     let masked = raw.replace(/\d/g, '#');
     masked = masked.replace(/[가-힣]+/g, function(word) {
@@ -797,82 +801,148 @@ function maskSmsForDebug(raw) {
     return masked;
 }
 
-let pendingSktSplit = null;
+function applyRetroactiveSktTail(tail) {
+    const rec = lastIncompleteSktRecord;
+    if (!rec) return false;
 
-window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNumber = '') {
-    if (!rawText || !rawText.trim()) return;
-    if (!kakaoMap) {
-        showAppAlert("지도가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "⏳ 지도 로딩 중");
-        return;
+    const { station, visit, historyIndex, group } = rec;
+    lastIncompleteSktRecord = null;
+
+    const baseDate = visit.startDate || new Date();
+    const month = (tail.month !== null) ? tail.month : baseDate.getMonth();
+    const day = (tail.day !== null) ? tail.day : baseDate.getDate();
+    const updatedDate = new Date(baseDate.getFullYear(), month, day, tail.hour, tail.min, 0);
+    const updatedTimeStr = `${pad2(month + 1)}/${pad2(day)} ${pad2(tail.hour)}:${pad2(tail.min)}`;
+
+    visit.startDate = updatedDate;
+    visit.endDate = updatedDate;
+    visit.startTimeStr = updatedTimeStr;
+    visit.endTimeStr = updatedTimeStr;
+    visit.isOffline = tail.isOffline;
+
+    if (savedSignalsHistory[historyIndex]) {
+        savedSignalsHistory[historyIndex].dateMs = updatedDate.getTime();
+        savedSignalsHistory[historyIndex].timeStr = updatedTimeStr;
+        savedSignalsHistory[historyIndex].isOffline = tail.isOffline;
+        saveHistoryToStorage();
     }
 
-    // 1) SKT 분할 문자 2부(예: "[Web발신] 06:33, N") 도착 여부 확인
-    const tail = (typeof parseSktSplitTail === 'function') ? parseSktSplitTail(rawText) : null;
-    if (tail) {
-        // 1-A. 대기 중인 1부가 있으면 즉시 합쳐서 1건으로 처리
-        if (pendingSktSplit) {
-            clearTimeout(pendingSktSplit.timer);
-            const tailText = `${pad2(tail.hour)}:${pad2(tail.min)},${tail.isOffline ? 'N' : 'Y'}`;
-            const mergedText = `${pendingSktSplit.rawText} ${tailText}`;
-            const mergedSender = pendingSktSplit.senderNumber || senderNumber;
-            pendingSktSplit = null;
-            window.receiveSmsFromAndroid(mergedText, isManualInput, mergedSender);
+    const isCurr = (group.currentStation === station);
+    if (station.overlay) {
+        station.overlay.setContent(buildStationMarkerHtml(station, isCurr));
+    }
+    if (station.circle) {
+        station.circle.setOptions({
+            strokeColor: tail.isOffline ? '#ff1744' : group.color,
+            fillColor: tail.isOffline ? '#ff1744' : group.color
+        });
+    }
+
+    const cardEl = document.getElementById(`log-card-${visit.logCardId}`);
+    const statusEl = document.getElementById(`log-status-${visit.logCardId}`);
+    const metaEl = document.getElementById(`log-meta-${visit.logCardId}`);
+    const badgeEl = cardEl ? cardEl.querySelector('.t-badge') : null;
+
+    if (cardEl) {
+        cardEl.className = tail.isOffline ? 'target-card offline-card' : 'target-card';
+    }
+    if (badgeEl) {
+        badgeEl.style.background = tail.isOffline ? '#ff1744' : station.color;
+    }
+    if (statusEl) {
+        if (tail.isOffline) {
+            statusEl.className = 't-status-tag off';
+            statusEl.innerText = `⚫ 전원 꺼짐 (${formatDurationMin(updatedDate, new Date())}째 꺼져 있음)`;
+        } else {
+            statusEl.className = 't-status-tag on';
+            statusEl.innerText = '🟢 신호 활성';
+        }
+    }
+    if (metaEl) {
+        metaEl.innerHTML = `기지국 PCI: <b>${escapeHtml(station.pci)}</b> | 확인일시: <b>${updatedTimeStr}</b> | 상세이력 보기(터치)`;
+    }
+
+    refreshTopDashboard();
+    playTacticalBeep(tail.isOffline);
+    sysLog(`🔗 [SKT 분할문자 후속반영] 확인일시(${updatedTimeStr}) 및 전원상태(${tail.isOffline ? '⚫ 꺼짐(N)' : '🟢 켜짐(Y)'})가 반영되었습니다.`, tail.isOffline ? "#ffab00" : "#00e676");
+    return true;
+}
+
+window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNumber = '') {
+    try {
+        if (!rawText || !rawText.trim()) return;
+        if (!kakaoMap) {
+            showAppAlert("지도가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "⏳ 지도 로딩 중");
             return;
         }
-        // 1-B. 3분 이내에 등록된 미완성 1부가 있으면 사후 보정
-        if (lastIncompleteSktRecord && (Date.now() - lastIncompleteSktRecord.createdAt < 180000)) {
-            applyRetroactiveSktTail(tail);
-            return;
-        }
-        // 1-C. 1부가 미완성으로 분류되지 않았더라도 직전 활성 마커가 있으면 바로 반영
-        if (lastActiveGroup && lastActiveGroup.currentStation) {
-            const st = lastActiveGroup.currentStation;
-            const lastVisit = st.visits[st.visits.length - 1];
-            const lastHistIdx = savedSignalsHistory.length - 1;
-            if (lastVisit) {
-                lastIncompleteSktRecord = {
-                    station: st,
-                    visit: lastVisit,
-                    historyIndex: lastHistIdx,
-                    group: lastActiveGroup,
-                    createdAt: Date.now()
-                };
+
+        // 1) SKT 분할 문자 2부(예: "[Web발신] 06:33, N") 도착 여부 확인
+        const tail = (typeof parseSktSplitTail === 'function') ? parseSktSplitTail(rawText) : null;
+        if (tail) {
+            if (pendingSktSplit) {
+                clearTimeout(pendingSktSplit.timer);
+                const tailText = `${pad2(tail.hour)}:${pad2(tail.min)},${tail.isOffline ? 'N' : 'Y'}`;
+                const mergedText = `${pendingSktSplit.rawText} ${tailText}`;
+                const mergedSender = pendingSktSplit.senderNumber || senderNumber;
+                pendingSktSplit = null;
+                window.receiveSmsFromAndroid(mergedText, isManualInput, mergedSender);
+                return;
+            }
+            if (lastIncompleteSktRecord && (Date.now() - lastIncompleteSktRecord.createdAt < 180000)) {
                 applyRetroactiveSktTail(tail);
                 return;
             }
+            if (lastActiveGroup && lastActiveGroup.currentStation) {
+                const st = lastActiveGroup.currentStation;
+                const lastVisit = st.visits[st.visits.length - 1];
+                const lastHistIdx = savedSignalsHistory.length - 1;
+                if (lastVisit) {
+                    lastIncompleteSktRecord = {
+                        station: st,
+                        visit: lastVisit,
+                        historyIndex: lastHistIdx,
+                        group: lastActiveGroup,
+                        createdAt: Date.now()
+                    };
+                    applyRetroactiveSktTail(tail);
+                    return;
+                }
+            }
+            sysLog(`⏳ [SKT 분할문자 2부] 연결할 직전 SKT 1부(주소) 문자가 없어 반영을 건너뛰었습니다.`, "#ffab00");
+            return;
         }
-        sysLog(`⏳ [SKT 분할문자 2부] 연결할 직전 SKT 1부(주소) 문자가 없어 반영을 건너뛰었습니다.`, "#ffab00");
-        return;
-    }
 
-    const parsed = parseSmsContent(rawText, senderNumber);
+        const parsed = parseSmsContent(rawText, senderNumber);
 
-    // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 3.5초 대기 후 병합/처리
-    if (parsed.isIncompleteSkt && !isManualInput) {
-        if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
-        pendingSktSplit = {
-            rawText,
-            senderNumber,
-            timer: setTimeout(function() {
-                const hold = pendingSktSplit;
-                pendingSktSplit = null;
-                if (hold) dispatchParsedSignal(parseSmsContent(hold.rawText, hold.senderNumber));
-            }, 3500)
-        };
-        return;
-    }
-
-    if (!parsed.address && !(parsed.directLat && parsed.directLng)) {
-        const hasCellHint = /(PCI|CPI|기지국|발신기지국|위치자료|위치확인|tmap|중계기|음영|\br\(\d+|D:\s*\d{4}|[CP]:\s*\d{4,5}|\[\s*[a-zA-Z]?\d{1,4}\s*\])/i.test(rawText);
-
-        if (isManualInput || hasCellHint) {
-            const debugPattern = escapeHtml(maskSmsForDebug(rawText));
-            sysLog(`⚠️ [양식 미인식 디버그] 주소 추출 실패 | 양식구조: "${debugPattern}" (개인정보 자동보호됨)`, "#ff1744");
+        // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 3.5초 대기 후 병합/처리
+        if (parsed.isIncompleteSkt && !isManualInput) {
+            if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
+            pendingSktSplit = {
+                rawText,
+                senderNumber,
+                timer: setTimeout(function() {
+                    const hold = pendingSktSplit;
+                    pendingSktSplit = null;
+                    if (hold) dispatchParsedSignal(parseSmsContent(hold.rawText, hold.senderNumber));
+                }, 3500)
+            };
+            return;
         }
-        return;
-    }
 
-    dispatchParsedSignal(parsed);
+        if (!parsed.address && !(parsed.directLat && parsed.directLng)) {
+            const hasCellHint = /(PCI|CPI|기지국|발신기지국|위치자료|위치확인|tmap|중계기|음영|\br\(\d+|D:\s*\d{4}|[CP]:\s*\d{4,5}|\[\s*[a-zA-Z]?\d{1,4}\s*\])/i.test(rawText);
+
+            if (isManualInput || hasCellHint) {
+                const debugPattern = escapeHtml(maskSmsForDebug(rawText));
+                sysLog(`⚠️ [양식 미인식 디버그] 주소 추출 실패 | 양식구조: "${debugPattern}" (개인정보 자동보호됨)`, "#ff1744");
+            }
+            return;
+        }
+
+        dispatchParsedSignal(parsed);
+    } catch (err) {
+        sysLog(`❌ [처리 오류] ${escapeHtml(err && err.message ? err.message : String(err))}`, "#ff1744");
+    }
 };
 
 function dispatchParsedSignal(parsed) {
@@ -981,6 +1051,7 @@ function processLocationSignal(lat, lng, parsed) {
     const btsAddress = parsed.btsAddress || '';
     const posAddress = parsed.posAddress || '';
 
+    const historyIndex = savedSignalsHistory.length;
     savedSignalsHistory.push({
         lat: lat,
         lng: lng,
@@ -1037,6 +1108,9 @@ function processLocationSignal(lat, lng, parsed) {
             }
             prevStation.overlay.setContent(buildStationMarkerHtml(prevStation, true));
             updateExistingLogCard(prevStation, prevVisit);
+            if (parsed.isIncompleteSkt && !isRestoringHistory) {
+                lastIncompleteSktRecord = { station: prevStation, visit: prevVisit, historyIndex, group, createdAt: Date.now() };
+            }
             renderPhoneFilterBar();
             refreshTopDashboard();
             if (!isRestoringHistory) playTacticalBeep(isOffline);
@@ -1044,7 +1118,6 @@ function processLocationSignal(lat, lng, parsed) {
         }
     }
 
-    // 기존 활성 지점을 과거 지점으로 전환 (과거 측위 지점은 반경 원 숨김)
     group.stations.forEach(st => {
         st.overlay.setContent(buildStationMarkerHtml(st, false));
         if (st.isEstimatedPos) {
@@ -1146,7 +1219,10 @@ function processLocationSignal(lat, lng, parsed) {
         allStationsMap[station.stationUid] = station;
     }
 
-    // ★ 측위(위치자료) 이동 동선은 얇고 흐린 회색 점선으로 표시
+    if (parsed.isIncompleteSkt && !isRestoringHistory) {
+        lastIncompleteSktRecord = { station, visit: newVisit, historyIndex, group, createdAt: Date.now() };
+    }
+
     if (isEstimatedPos) {
         group.polyline.setOptions({
             strokeWeight: 2,
@@ -1213,7 +1289,6 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
-    // ★ 과거 측위(SKT 위치자료) 지점은 반경 원·라벨 없이 흐리고 작은 점(●)으로만 표시
     if (st.isEstimatedPos) {
         return `
             <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})" title="#${st.seq} 측위 (${lastVisit.endTimeStr})">
