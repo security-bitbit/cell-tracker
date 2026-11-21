@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 및 카카오맵 제어 모듈 - 통신 3사 통합 파서 연동본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - SKT 위치자료/발신기지국 구분 및 동일 PCI 내 이동 추적본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -19,7 +19,6 @@ let showRadius = true;
 let showRoute = true;
 let labelMode = 'AUTO';
 
-// ★ 내 위치(GPS) 및 내 폰이 현재 잡고 있는 실시간 기지국 PCI 상태 관리 변수
 let myGpsWatchId = null;
 let myGpsOverlay = null;
 let myGpsCircle = null;
@@ -27,12 +26,10 @@ let myLastLatLng = null;
 let myCurrentPci = null;
 let myCurrentNetType = "";
 
-// ★ 앱을 껐다 켜도 기록이 유지되도록 로컬 스토리지에 보관할 키 이름과 배열
 const STORAGE_KEY_SIGNALS = 'CELL_TRACKER_SAVED_SIGNALS_V1';
 let savedSignalsHistory = [];
 let isRestoringHistory = false;
 
-// ★ HTML 특수문자 안전 치환 (XSS 방지)
 function escapeHtml(str) {
     return String(str || '')
         .replace(/&/g, '&amp;')
@@ -54,7 +51,7 @@ function sysLog(msg, color = '#00e676') {
 }
 
 // =====================================================================
-// ★ [안드로이드 네이티브 -> 웹] 현재 내 휴대폰이 잡고 있는 실시간 PCI 수신 브릿지
+// ★ [안드로이드 네이티브 -> 웹] 현재 내 휴대폰 실시간 PCI 수신 브릿지
 // =====================================================================
 window.updateMyPhonePci = function(pciStr, netType) {
     if (!pciStr) return;
@@ -70,22 +67,21 @@ window.updateMyPhonePci = function(pciStr, netType) {
     }
 };
 
-// ★ 상단 '최근 PCI' 카드를 터치했을 때 뜨는 통신사(알뜰폰 포함) PCI 비교 가이드 팝업
+// ★ 상단 '최근 PCI ⓘ' 가이드 팝업 (SKT 위치자료/발신기지국 기준 안내 추가)
 window.showPciGuideAlert = function() {
     const msg = 
         "1. 동일 통신망끼리만 PCI 값이 같게 표시됩니다\n" +
         "• SKT·KT·LGU+는 각자 고유의 기지국 안테나를 사용하므로, 같은 장소에 있어도 타겟(피의자)과 내 휴대폰의 통신망이 같아야 동일한 PCI 번호가 표시됩니다.\n\n" +
         "2. 알뜰폰(별정통신사)은 모회사 통신망을 그대로 따릅니다\n" +
         "• 알뜰폰은 자체 기지국이 없으므로 실제 빌려 쓰는 물리적 통신망과 100% 동일한 PCI 값을 가집니다.\n" +
-        "  - SKT 및 SKT망 알뜰폰 ➔ 동일 PCI 표시\n" +
-        "  - KT 및 KT망 알뜰폰 ➔ 동일 PCI 표시\n" +
-        "  - LGU+ 및 LGU+망 알뜰폰 ➔ 동일 PCI 표시\n\n" +
-        "💡 현장 팁: 추적 대상자의 통신망과 같은 통신사(또는 해당 망 알뜰폰)를 쓰는 수사관의 휴대폰에서 '내폰 PCI'를 비교하시면 가장 정확합니다.";
+        "  - SKT / KT / LGU+ 및 각 망 알뜰폰 ➔ 동일 PCI 표시\n\n" +
+        "3. SKT [위치자료]와 [발신기지국] 표시 기준\n" +
+        "• SKT 문자에 [위치자료](T-map 측위 좌표)가 포함된 경우, 안테나 위치인 [발신기지국]보다 정확한 단말기 추정 위치인 [위치자료]를 기준으로 지도에 '📍측위' 마커가 표시됩니다.\n" +
+        "• 동일 PCI 안에서도 [위치자료] 좌표가 30m 이상 이동하면 새 마커와 동선으로 자동 반영되며, 수신 내역 카드에서 [위치자료]와 [발신기지국] 주소를 모두 확인하실 수 있습니다.";
 
-    showAppAlert(msg, "📡 실시간 기지국 PCI 비교 안내");
+    showAppAlert(msg, "📡 실시간 PCI 및 위치 표시 안내");
 };
 
-// ★ 상단 상황판 3번째 칸('최근 PCI')에 [타겟 PCI]와 [내 폰 실시간 PCI]를 동시에 렌더링
 function renderMyPciOnDashboard() {
     const pciValEl = document.getElementById('kpi-pci');
     if (!pciValEl) return;
@@ -360,6 +356,9 @@ function restoreHistoryFromStorage() {
                 netType: item.netType || '',
                 cellType: item.cellType || '',
                 radius: item.radius || null,
+                isEstimatedPos: !!item.isEstimatedPos,
+                btsAddress: item.btsAddress || '',
+                posAddress: item.posAddress || '',
                 dateObj: new Date(item.dateMs),
                 timeStr: item.timeStr,
                 isOffline: item.isOffline
@@ -380,7 +379,6 @@ window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('report-email-display').innerText = REPORT_EMAIL;
     renderChangelogList();
 
-    // ★ 상단 '최근 PCI' 카드에 자동으로 ⓘ 아이콘과 안내 팝업 클릭 이벤트를 연결!
     const pciValEl = document.getElementById('kpi-pci');
     if (pciValEl && pciValEl.parentElement) {
         const pciCard = pciValEl.parentElement;
@@ -392,7 +390,7 @@ window.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ★ 시작 로그 및 보안/통신망(알뜰폰) PCI 안내 문구 출력
+    sysLog(`📍 [SKT 측위 안내] SKT 문자에 [위치자료](T-map 좌표)가 포함된 경우 [발신기지국] 대신 단말기 추정 위치인 [위치자료] 기준으로 표시되며, 동일 PCI 내 30m 이상 이동 시 동선이 자동 갱신됩니다.`, "#00e5ff");
     sysLog(`💡 [PCI 비교 안내] 실시간 내폰 PCI는 별정통신사(알뜰폰) 여부와 무관하게 실제 사용하는 통신망(SKT망·KT망·LGU+망)이 타겟과 같을 때 동일한 PCI 값으로 표시됩니다. (상단 '최근 PCI ⓘ' 터치 시 상세안내)`, "#ffd740");
     sysLog(`🔒 [보안 작동 중] 기지국 위치추적 외 개인 문자·카톡은 절대 수집/기록하지 않으며 모든 데이터는 기기 내부에만 보관됩니다.`, "#8ab8cc");
     sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
@@ -504,7 +502,7 @@ window.sendFeedbackMail = function() {
     window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(content)}`;
 };
 
-// ===== 선택형 초기화 모달 및 커스텀 2중 확인창 =====
+// ===== 선택형 초기화 모달 =====
 window.openResetModal = function() {
     if (phoneOrder.length === 0) {
         showAppAlert("현재 초기화할 추적 데이터가 없습니다.", "🗑️ 데이터 없음");
@@ -527,7 +525,7 @@ function renderResetModalList() {
                 <div class="reset-phone-info">
                     <span class="phone-color-dot" style="background:${g.color};"></span>
                     <span>📱 ${displayPhone}</span>
-                    <span style="font-size:11px; color:#8ab8cc; font-weight:normal;">(포착 기지국: ${g.stations.length}개소)</span>
+                    <span style="font-size:11px; color:#8ab8cc; font-weight:normal;">(포착 지점: ${g.stations.length}개소)</span>
                 </div>
                 <button class="btn btn-red" onclick="confirmAndClearSinglePhone('${escapeHtml(phone)}')">선택 삭제</button>
             </div>
@@ -796,7 +794,6 @@ function maskSmsForDebug(raw) {
     return masked;
 }
 
-// SKT 타사 회신 시 2건으로 분할 수신되는 문자 자동 병합 버퍼
 let pendingSktSplit = null;
 
 window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNumber = '') {
@@ -806,7 +803,6 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
         return;
     }
 
-    // 1) SKT 분할 문자 2부(예: "[Web발신]\n06:33,N")가 뒤이어 도착한 경우 1부와 자동 병합
     const cleanedTail = rawText.replace(/\r\n|\r|\n/g, ' ').replace(/\[Web발신\]/gi, '').trim();
     if (pendingSktSplit && /^\d{1,2}\s*:\s*\d{2}\s*,\s*[YN]$/i.test(cleanedTail)) {
         clearTimeout(pendingSktSplit.timer);
@@ -819,7 +815,6 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
 
     const parsed = parseSmsContent(rawText, senderNumber);
 
-    // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 1.5초 대기 후 병합/처리
     if (parsed.isIncompleteSkt && !isManualInput) {
         if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
         pendingSktSplit = {
@@ -853,9 +848,9 @@ function dispatchParsedSignal(parsed) {
     const radiusTag = parsed.radius ? ` | 반경:${parsed.radius}m` : '';
     const safeAddr = escapeHtml(parsed.address || '좌표 직결 위치');
 
-    // SKT T-map 측위 좌표가 있으면 지오코딩 없이 바로 정밀 마커 표시
     if (parsed.directLat && parsed.directLng) {
-        sysLog(`📡 [${escapeHtml(carrierTag)} 측위직결] 📱${dispPhone} | PCI:${escapeHtml(parsed.pci)} | ${safeAddr}`, "#00e5ff");
+        const btsInfo = parsed.btsAddress ? ` (발신기지국: ${escapeHtml(parsed.btsAddress)})` : '';
+        sysLog(`📍 [${escapeHtml(carrierTag)} 위치자료 측위] 📱${dispPhone} | PCI:${escapeHtml(parsed.pci)} | ${safeAddr}${btsInfo}`, "#00e5ff");
         processLocationSignal(parsed.directLat, parsed.directLng, parsed);
         return;
     }
@@ -907,6 +902,8 @@ function geocodeOnKakao(parsed) {
     trySearch(primaryQuery, function() {
         if (fallbackQuery && fallbackQuery !== primaryQuery) {
             sysLog(`[위치자료] 주소 검색 실패 -> [발신기지국] 주소(${escapeHtml(fallbackQuery)})로 대체 추적합니다.`, "#ffab00");
+            parsed.isEstimatedPos = false;
+            parsed.address = parsed.btsAddress || fallbackQuery;
             trySearch(fallbackQuery, function() {
                 sysLog(`주소 변환 실패: [${escapeHtml(primaryQuery)}]`, "#ff1744");
             });
@@ -947,6 +944,9 @@ function getOrCreatePhoneGroup(phone) {
 
 function processLocationSignal(lat, lng, parsed) {
     const { phone, address, pci, dateObj: eventDate, timeStr, isOffline } = parsed;
+    const isEstimatedPos = !!parsed.isEstimatedPos;
+    const btsAddress = parsed.btsAddress || '';
+    const posAddress = parsed.posAddress || '';
 
     savedSignalsHistory.push({
         lat: lat,
@@ -958,6 +958,9 @@ function processLocationSignal(lat, lng, parsed) {
         netType: parsed.netType || '',
         cellType: parsed.cellType || '',
         radius: parsed.radius || null,
+        isEstimatedPos: isEstimatedPos,
+        btsAddress: btsAddress,
+        posAddress: posAddress,
         dateMs: eventDate ? eventDate.getTime() : Date.now(),
         timeStr: timeStr,
         isOffline: isOffline
@@ -973,9 +976,14 @@ function processLocationSignal(lat, lng, parsed) {
     if (group.currentStation) {
         const prevStation = group.currentStation;
         const prevVisit = prevStation.visits[prevStation.visits.length - 1];
-        const isSamePci = (pci !== "미상" && prevStation.pci === pci) || (pci === "미상" && prevStation.address === address);
+        const distFromPrevKm = calcDistKm(prevStation.lat, prevStation.lng, lat, lng);
 
-        if (prevVisit && prevVisit.isOffline && (!isSamePci || !isOffline)) {
+        // ★ SKT [위치자료](측위)는 같은 PCI라도 30m 이상 이동하면 새 지점으로 추적!
+        const isSameSpot = (isEstimatedPos || prevStation.isEstimatedPos)
+            ? (distFromPrevKm < 0.03)
+            : ((pci !== "미상" && prevStation.pci === pci) || (pci === "미상" && prevStation.address === address));
+
+        if (prevVisit && prevVisit.isOffline && (!isSameSpot || !isOffline)) {
             prevVisit.offlineEndedDate = eventDate;
             prevVisit.endTimeStr = timeStr;
             const offDurationStr = formatDurationMin(prevVisit.startDate, eventDate);
@@ -989,7 +997,7 @@ function processLocationSignal(lat, lng, parsed) {
             }
         }
 
-        if (isSamePci && prevVisit.isOffline === isOffline) {
+        if (isSameSpot && prevVisit.isOffline === isOffline) {
             prevVisit.count++;
             if (!isOffline) {
                 prevVisit.endDate = eventDate;
@@ -1015,7 +1023,13 @@ function processLocationSignal(lat, lng, parsed) {
         });
     });
 
-    let station = group.stations.find(st => (pci !== "미상" && st.pci === pci && Math.abs(st.lat - lat) < 0.005) || (st.address === address));
+    // 재방문 판별: SKT 측위는 30m 이내일 때만 동일 지점 재방문으로 병합
+    let station = group.stations.find(st => {
+        if (isEstimatedPos || st.isEstimatedPos) {
+            return calcDistKm(st.lat, st.lng, lat, lng) < 0.03;
+        }
+        return (pci !== "미상" && st.pci === pci && Math.abs(st.lat - lat) < 0.005) || (st.address === address);
+    });
 
     logSeqCounter++;
     const newVisit = {
@@ -1042,14 +1056,16 @@ function processLocationSignal(lat, lng, parsed) {
         station.overlay.setContent(buildStationMarkerHtml(station, true));
         group.currentStation = station;
         if (!isRestoringHistory) {
-            sysLog(`[재방문 감지] ${escapeHtml(formatPhoneDisplay(phone))} -> #${station.seq} 기지국(PCI:${escapeHtml(pci)}) ${station.visits.length}번째 방문!`, "#ffab00");
+            const locType = station.isEstimatedPos ? '위치자료' : '기지국';
+            sysLog(`[재방문 감지] ${escapeHtml(formatPhoneDisplay(phone))} -> #${station.seq} ${locType}(PCI:${escapeHtml(pci)}) ${station.visits.length}번째 방문!`, "#ffab00");
         }
     } else {
         stationUidCounter++;
         const seq = group.stations.length + 1;
+        // SKT 측위는 기본 반경을 150m로 좁혀 정밀도 체감 향상, KT는 문자 반경 적용, 기타 400m
         const circleRadius = parsed.radius
             ? Math.min(Math.max(parsed.radius, 50), 2500)
-            : 400;
+            : (isEstimatedPos ? 150 : 400);
 
         const circle = new kakao.maps.Circle({
             map: (group.visible && showRadius) ? kakaoMap : null,
@@ -1071,6 +1087,9 @@ function processLocationSignal(lat, lng, parsed) {
             lat: lat,
             lng: lng,
             address: address,
+            isEstimatedPos: isEstimatedPos,
+            btsAddress: btsAddress,
+            posAddress: posAddress,
             pci: pci,
             visits: [newVisit],
             circle: circle,
@@ -1113,6 +1132,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
     const revisitTag = totalVisits > 1 ? `<span class="revisit-badge">${totalVisits}회 방문</span>` : '';
     const phoneBadge = getShortPhoneLabel(st.phone);
     const safePci = escapeHtml(st.pci);
+    const modeTag = st.isEstimatedPos ? '📍측위' : '활성';
 
     if (isCurrentActive) {
         if (lastVisit.isOffline) {
@@ -1139,7 +1159,7 @@ function buildStationMarkerHtml(st, isCurrentActive) {
                     <div class="ripple-ring delay-2"></div>
                     <div class="node-core"></div>
                     <div class="node-label">
-                        ${phoneBadge}#${st.seq} 활성 [PCI:${safePci}] ${revisitTag}
+                        ${phoneBadge}#${st.seq} ${modeTag} [PCI:${safePci}] ${revisitTag}
                         <span class="sub-time">${stayText}</span>
                     </div>
                 </div>
@@ -1149,14 +1169,14 @@ function buildStationMarkerHtml(st, isCurrentActive) {
 
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
-    const miniPciText = st.pci !== '미상' ? `PCI:${safePci}` : `#${st.seq}`;
+    const miniPciText = st.isEstimatedPos ? `📍#${st.seq}` : (st.pci !== '미상' ? `PCI:${safePci}` : `#${st.seq}`);
 
     return `
         <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
             <div class="node-core"></div>
             <div class="node-mini-badge">${miniPciText}</div>
             <div class="node-label">
-                ${phoneBadge}#${st.seq} [PCI:${safePci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
+                ${phoneBadge}#${st.seq}${st.isEstimatedPos ? '📍' : ''} [PCI:${safePci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
             </div>
         </div>
     `;
@@ -1231,8 +1251,14 @@ window.openHistoryModal = function(stationUid) {
     if (!st) return;
 
     const displayPhone = formatPhoneDisplay(st.phone);
-    document.getElementById('hist-title').innerText = `📍 [${displayPhone}] 기지국 #${st.seq} (PCI: ${st.pci}) 이력`;
-    document.getElementById('hist-addr').innerText = st.address;
+    const typeTitle = st.isEstimatedPos ? '위치자료(측위)' : '기지국';
+    document.getElementById('hist-title').innerText = `📍 [${displayPhone}] ${typeTitle} #${st.seq} (PCI: ${st.pci}) 이력`;
+
+    if (st.isEstimatedPos && st.btsAddress) {
+        document.getElementById('hist-addr').innerText = `📍 위치자료(측위): ${st.address}\n📡 발신기지국: ${st.btsAddress}`;
+    } else {
+        document.getElementById('hist-addr').innerText = st.address;
+    }
 
     let totalMs = 0;
     st.visits.forEach(v => {
@@ -1295,7 +1321,7 @@ function refreshTopDashboard() {
     const visit = st.visits[st.visits.length - 1];
 
     if (selectedPhoneFilter === 'ALL') {
-        document.getElementById('kpi-count-label').innerText = `전체 기지국 (${phoneOrder.length}명)`;
+        document.getElementById('kpi-count-label').innerText = `전체 지점 (${phoneOrder.length}명)`;
         document.getElementById('kpi-count').innerText = `${Object.keys(allStationsMap).length} 개소`;
     } else {
         const disp = formatPhoneDisplay(selectedPhoneFilter);
@@ -1358,15 +1384,20 @@ function createNewLogCard(st, visit) {
     const displayPhone = escapeHtml(formatPhoneDisplay(st.phone));
     const safeAddr = escapeHtml(st.address);
     const safePci = escapeHtml(st.pci);
+    const seqBadgeText = st.isEstimatedPos ? `📍위치자료 #${st.seq}` : `기지국 #${st.seq}`;
+    const btsSubRow = (st.isEstimatedPos && st.btsAddress)
+        ? `<div style="font-size:10.5px; color:#8ab8cc; margin-top:2px;">📡 발신기지국: ${escapeHtml(st.btsAddress)}</div>`
+        : '';
 
     card.innerHTML = `
         <div style="cursor:pointer; width:100%;" onclick="kakaoMap.panTo(new kakao.maps.LatLng(${st.lat}, ${st.lng})); openHistoryModal(${st.stationUid});">
             <div>
                 <span class="t-phone-tag" style="background:${st.color};">📱 ${displayPhone}</span>
-                <span class="t-badge" style="background:${ visit.isOffline ? '#ff1744' : st.color };">기지국 #${st.seq}</span>
+                <span class="t-badge" style="background:${ visit.isOffline ? '#ff1744' : st.color };">${seqBadgeText}</span>
                 ${statusBadge}
                 <span class="t-addr">${safeAddr}${revisitNotice}</span>
             </div>
+            ${btsSubRow}
             <div class="t-meta" id="log-meta-${visit.logCardId}">
                 기지국 PCI: <b>${safePci}</b> | 확인일시: <b>${visit.startTimeStr}</b> | 상세이력 보기(터치)
             </div>
@@ -1384,17 +1415,18 @@ function updateExistingLogCard(st, visit) {
     const statusEl = document.getElementById(`log-status-${visit.logCardId}`);
     const metaEl = document.getElementById(`log-meta-${visit.logCardId}`);
     const safePci = escapeHtml(st.pci);
+    const locLabel = st.isEstimatedPos ? '동일 위치' : '동일 기지국';
 
     if (!visit.isOffline) {
         const stayStr = formatDurationMin(visit.startDate, visit.endDate);
         if (statusEl) {
-            statusEl.innerText = `🟢 동일 기지국 ${stayStr}간 체류 (${visit.count}회 연속 수신)`;
+            statusEl.innerText = `🟢 ${locLabel} ${stayStr}간 체류 (${visit.count}회 연속 수신)`;
         }
         if (metaEl) {
             metaEl.innerHTML = `기지국 PCI: <b>${safePci}</b> | 체류일시: <b>${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})</b> | 상세이력(터치)`;
         }
         if (!isRestoringHistory) {
-            sysLog(`[동일 PCI 연속수신] ${escapeHtml(formatPhoneDisplay(st.phone))} #${st.seq}(PCI:${safePci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
+            sysLog(`[동일 지점 연속수신] ${escapeHtml(formatPhoneDisplay(st.phone))} #${st.seq}(PCI:${safePci}) 체류일시: ${visit.startTimeStr} ~ ${visit.endTimeStr} (${stayStr})`, "#00e676");
         }
     } else {
         const elapsed = formatDurationMin(visit.startDate, new Date());
@@ -1580,10 +1612,8 @@ function playTacticalBeep(isOffline) {
     const FIRST_VISIT_KEY = 'ARGUS_DEVICE_REGISTERED_V1';
 
     window.addEventListener('DOMContentLoaded', function() {
-        // 1. 전체 누적 실행 횟수 +1
         fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches/up`).catch(() => {});
 
-        // 2. 최초 실행 기기인 경우에만 순수 사용자 수 +1
         try {
             if (!localStorage.getItem(FIRST_VISIT_KEY)) {
                 fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users/up`)
@@ -1594,7 +1624,6 @@ function playTacticalBeep(isOffline) {
             }
         } catch (e) {}
 
-        // 3. 상단 버전 배지(#header-ver-badge)를 정확히 3초(3000ms)간 꾹 눌러야 통계 팝업 오픈!
         const verBadge = document.getElementById('header-ver-badge');
         if (!verBadge) return;
 
