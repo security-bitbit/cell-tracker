@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 - SKT 위치자료/발신기지국 구분 및 동일 PCI 내 이동 추적본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - 과거 측위 지점 슬림화(점+동선) 적용본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -67,7 +67,6 @@ window.updateMyPhonePci = function(pciStr, netType) {
     }
 };
 
-// ★ 상단 '최근 PCI ⓘ' 가이드 팝업 (SKT 위치자료/발신기지국 기준 안내 추가)
 window.showPciGuideAlert = function() {
     const msg = 
         "1. 동일 통신망끼리만 PCI 값이 같게 표시됩니다\n" +
@@ -77,7 +76,7 @@ window.showPciGuideAlert = function() {
         "  - SKT / KT / LGU+ 및 각 망 알뜰폰 ➔ 동일 PCI 표시\n\n" +
         "3. SKT [위치자료]와 [발신기지국] 표시 기준\n" +
         "• SKT 문자에 [위치자료](T-map 측위 좌표)가 포함된 경우, 안테나 위치인 [발신기지국]보다 정확한 단말기 추정 위치인 [위치자료]를 기준으로 지도에 '📍측위' 마커가 표시됩니다.\n" +
-        "• 동일 PCI 안에서도 [위치자료] 좌표가 30m 이상 이동하면 새 마커와 동선으로 자동 반영되며, 수신 내역 카드에서 [위치자료]와 [발신기지국] 주소를 모두 확인하실 수 있습니다.";
+        "• 지나온 과거 측위 지점은 지도가 복잡해지지 않도록 작은 점(●)과 이동 동선으로만 간결하게 표시되며, 점을 터치하면 상세 이력을 확인할 수 있습니다.";
 
     showAppAlert(msg, "📡 실시간 PCI 및 위치 표시 안내");
 };
@@ -390,7 +389,7 @@ window.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    sysLog(`📍 [SKT 측위 안내] SKT 문자에 [위치자료](T-map 좌표)가 포함된 경우 [발신기지국] 대신 단말기 추정 위치인 [위치자료] 기준으로 표시되며, 동일 PCI 내 30m 이상 이동 시 동선이 자동 갱신됩니다.`, "#00e5ff");
+    sysLog(`📍 [SKT 측위 안내] SKT 문자에 [위치자료](T-map 좌표)가 포함된 경우 [발신기지국] 대신 단말기 추정 위치인 [위치자료] 기준으로 표시되며, 지나온 측위 지점은 작은 점(●)과 동선으로만 간결히 표시됩니다.`, "#00e5ff");
     sysLog(`💡 [PCI 비교 안내] 실시간 내폰 PCI는 별정통신사(알뜰폰) 여부와 무관하게 실제 사용하는 통신망(SKT망·KT망·LGU+망)이 타겟과 같을 때 동일한 PCI 값으로 표시됩니다. (상단 '최근 PCI ⓘ' 터치 시 상세안내)`, "#ffd740");
     sysLog(`🔒 [보안 작동 중] 기지국 위치추적 외 개인 문자·카톡은 절대 수집/기록하지 않으며 모든 데이터는 기기 내부에만 보관됩니다.`, "#8ab8cc");
     sysLog(`아르고스(ARGUS) 경찰 기지국 위치추적 시스템 (${APP_VERSION}) 가동 시작...`, "#00e5ff");
@@ -773,8 +772,13 @@ function syncMapLayersVisibility() {
             group.polyline.setMap((isGroupVis && showRoute) ? kakaoMap : null);
         }
         group.stations.forEach(st => {
+            const isCurr = (group.currentStation === st);
             if (st.overlay) st.overlay.setMap(isGroupVis ? kakaoMap : null);
-            if (st.circle) st.circle.setMap((isGroupVis && showRadius) ? kakaoMap : null);
+            if (st.circle) {
+                // 과거 측위 지점은 반경 원 숨김 (최신 활성 지점만 표시)
+                const shouldShowCircle = isGroupVis && showRadius && (!st.isEstimatedPos || isCurr);
+                st.circle.setMap(shouldShowCircle ? kakaoMap : null);
+            }
         });
     });
 }
@@ -978,7 +982,6 @@ function processLocationSignal(lat, lng, parsed) {
         const prevVisit = prevStation.visits[prevStation.visits.length - 1];
         const distFromPrevKm = calcDistKm(prevStation.lat, prevStation.lng, lat, lng);
 
-        // ★ SKT [위치자료](측위)는 같은 PCI라도 30m 이상 이동하면 새 지점으로 추적!
         const isSameSpot = (isEstimatedPos || prevStation.isEstimatedPos)
             ? (distFromPrevKm < 0.03)
             : ((pci !== "미상" && prevStation.pci === pci) || (pci === "미상" && prevStation.address === address));
@@ -1012,18 +1015,22 @@ function processLocationSignal(lat, lng, parsed) {
         }
     }
 
+    // 기존 활성 지점을 과거 지점으로 전환 (과거 측위 지점은 반경 원 숨김)
     group.stations.forEach(st => {
         st.overlay.setContent(buildStationMarkerHtml(st, false));
-        st.circle.setOptions({
-            strokeWeight: 1.5,
-            strokeColor: group.color,
-            strokeOpacity: 0.35,
-            fillColor: group.color,
-            fillOpacity: 0.03
-        });
+        if (st.isEstimatedPos) {
+            st.circle.setMap(null);
+        } else {
+            st.circle.setOptions({
+                strokeWeight: 1.5,
+                strokeColor: group.color,
+                strokeOpacity: 0.35,
+                fillColor: group.color,
+                fillOpacity: 0.03
+            });
+        }
     });
 
-    // 재방문 판별: SKT 측위는 30m 이내일 때만 동일 지점 재방문으로 병합
     let station = group.stations.find(st => {
         if (isEstimatedPos || st.isEstimatedPos) {
             return calcDistKm(st.lat, st.lng, lat, lng) < 0.03;
@@ -1053,6 +1060,7 @@ function processLocationSignal(lat, lng, parsed) {
             fillColor: isOffline ? '#ff1744' : group.color,
             fillOpacity: 0.1
         });
+        station.circle.setMap((group.visible && showRadius) ? kakaoMap : null);
         station.overlay.setContent(buildStationMarkerHtml(station, true));
         group.currentStation = station;
         if (!isRestoringHistory) {
@@ -1062,7 +1070,6 @@ function processLocationSignal(lat, lng, parsed) {
     } else {
         stationUidCounter++;
         const seq = group.stations.length + 1;
-        // SKT 측위는 기본 반경을 150m로 좁혀 정밀도 체감 향상, KT는 문자 반경 적용, 기타 400m
         const circleRadius = parsed.radius
             ? Math.min(Math.max(parsed.radius, 50), 2500)
             : (isEstimatedPos ? 150 : 400);
@@ -1167,16 +1174,25 @@ function buildStationMarkerHtml(st, isCurrentActive) {
         }
     }
 
+    // ★ 과거 측위(SKT 위치자료) 지점은 반경 원·라벨 없이 깔끔한 작은 점(●)으로만 표시
+    if (st.isEstimatedPos) {
+        return `
+            <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})" title="#${st.seq} 측위 (${lastVisit.endTimeStr})">
+                <div class="node-core" style="width:10px; height:10px; opacity:0.85;"></div>
+            </div>
+        `;
+    }
+
     const stayMin = formatDurationMin(lastVisit.startDate, lastVisit.endDate);
     const pastSub = (lastVisit.count > 1 && !lastVisit.isOffline) ? ` (${stayMin} 체류)` : '';
-    const miniPciText = st.isEstimatedPos ? `📍#${st.seq}` : (st.pci !== '미상' ? `PCI:${safePci}` : `#${st.seq}`);
+    const miniPciText = st.pci !== '미상' ? `PCI:${safePci}` : `#${st.seq}`;
 
     return `
         <div class="tactical-node past" style="--target-color:${st.color};" onclick="openHistoryModal(${st.stationUid})">
             <div class="node-core"></div>
             <div class="node-mini-badge">${miniPciText}</div>
             <div class="node-label">
-                ${phoneBadge}#${st.seq}${st.isEstimatedPos ? '📍' : ''} [PCI:${safePci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
+                ${phoneBadge}#${st.seq} [PCI:${safePci}] 🕒${lastVisit.endTimeStr}${pastSub} ${revisitTag}
             </div>
         </div>
     `;
