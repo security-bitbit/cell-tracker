@@ -29,11 +29,13 @@ function parseSmsContent(rawText, senderNumber = '') {
 }
 
 // ★ SKT 타사 회신 시 2부로 따로 도착하는 시간·전원상태 문자 판별기
-// 예: "[Web발신]\n06:33,N" | "06:33, Y" | "05-28 06:33,N"
+// 예: "[Web발신]\n06:33,N" | "[Web 발신] 06:33, N" | "05-28 06:33,Y"
 function parseSktSplitTail(rawText) {
     const cleaned = String(rawText || '')
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ') // 보이지 않는 공백 제거
         .replace(/\r\n|\r|\n/g, ' ')
-        .replace(/\[Web발신\]/gi, '')
+        .replace(/[\[\(]\s*(?:Web|웹)\s*발신\s*[\]\)]/gi, ' ')
+        .replace(/제목\s*:\s*(?:CSMS|[^\s]{1,12})?/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
