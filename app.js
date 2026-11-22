@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 - SKT 분할문자 병합/사후보정 & 측위 슬림화 최종본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - 행동패턴 분석 & 관리자 샘플 생성기 연동 최종본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -369,11 +369,55 @@ function restoreHistoryFromStorage() {
         });
         isRestoringHistory = false;
         saveHistoryToStorage();
+
+        // 복원 후 일괄 지도/UI 갱신
+        phoneOrder.forEach(p => {
+            const g = phoneGroups[p];
+            if (g && g.polyline) {
+                g.polyline.setPath(g.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
+                g.polyline.setMap((g.visible && showRoute) ? kakaoMap : null);
+            }
+        });
+        if (lastActiveGroup && lastActiveGroup.currentStation && lastActiveGroup.visible) {
+            kakaoMap.panTo(new kakao.maps.LatLng(lastActiveGroup.currentStation.lat, lastActiveGroup.currentStation.lng));
+        }
+        renderPhoneFilterBar();
+        refreshTopDashboard();
+        applyLabelVisibilityRule();
+        syncMapLayersVisibility();
+
         sysLog(`[기록 자동 복원] 이전 추적 데이터 ${list.length}건을 성공적으로 불러왔습니다.`, "#00e5ff");
     } catch (e) {
         isRestoringHistory = false;
     }
 }
+
+// ★ 관리자 샘플 생성기 고속 일괄 반영 함수
+window.batchImportSignals = function(batchList) {
+    if (!Array.isArray(batchList) || batchList.length === 0) return;
+    isRestoringHistory = true;
+    batchList.forEach(item => {
+        processLocationSignal(item.lat, item.lng, item.parsed);
+    });
+    isRestoringHistory = false;
+    saveHistoryToStorage();
+
+    // 일괄 렌더링 마무리
+    phoneOrder.forEach(p => {
+        const g = phoneGroups[p];
+        if (g && g.polyline) {
+            g.polyline.setPath(g.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
+            g.polyline.setMap((g.visible && showRoute) ? kakaoMap : null);
+        }
+    });
+    if (lastActiveGroup && lastActiveGroup.currentStation && lastActiveGroup.visible) {
+        kakaoMap.panTo(new kakao.maps.LatLng(lastActiveGroup.currentStation.lat, lastActiveGroup.currentStation.lng));
+    }
+    renderPhoneFilterBar();
+    refreshTopDashboard();
+    applyLabelVisibilityRule();
+    syncMapLayersVisibility();
+};
 
 window.addEventListener('DOMContentLoaded', function() {
     document.getElementById('header-ver-badge').innerText = APP_VERSION;
@@ -563,6 +607,10 @@ window.confirmAndClearSinglePhone = function(phoneKey) {
             savedSignalsHistory = savedSignalsHistory.filter(item => item.phone !== phoneKey);
             saveHistoryToStorage();
 
+            if (typeof window.clearPatternOverlays === 'function') {
+                window.clearPatternOverlays();
+            }
+
             sysLog(`[선택 초기화] 📱 ${escapeHtml(displayPhone)} 대상자의 모든 추적 기록이 삭제되었습니다.`, "#ffab00");
 
             if (phoneOrder.length === 0) {
@@ -614,6 +662,10 @@ window.confirmAndClearAll = function() {
 
             savedSignalsHistory = [];
             try { localStorage.removeItem(STORAGE_KEY_SIGNALS); } catch (e) {}
+
+            if (typeof window.clearPatternOverlays === 'function') {
+                window.clearPatternOverlays();
+            }
 
             resetDashboardToEmpty();
             closeResetModal();
@@ -1040,7 +1092,9 @@ function getOrCreatePhoneGroup(phone) {
         };
         phoneOrder.push(phone);
 
-        refreshAllPhoneLabelsOnUI();
+        if (!isRestoringHistory) {
+            refreshAllPhoneLabelsOnUI();
+        }
     }
     return phoneGroups[phone];
 }
@@ -1075,7 +1129,7 @@ function processLocationSignal(lat, lng, parsed) {
     lastActiveGroup = group;
 
     const pos = new kakao.maps.LatLng(lat, lng);
-    if (group.visible) kakaoMap.panTo(pos);
+    if (group.visible && !isRestoringHistory) kakaoMap.panTo(pos);
 
     if (group.currentStation) {
         const prevStation = group.currentStation;
@@ -1111,9 +1165,11 @@ function processLocationSignal(lat, lng, parsed) {
             if (parsed.isIncompleteSkt && !isRestoringHistory) {
                 lastIncompleteSktRecord = { station: prevStation, visit: prevVisit, historyIndex, group, createdAt: Date.now() };
             }
-            renderPhoneFilterBar();
-            refreshTopDashboard();
-            if (!isRestoringHistory) playTacticalBeep(isOffline);
+            if (!isRestoringHistory) {
+                renderPhoneFilterBar();
+                refreshTopDashboard();
+                playTacticalBeep(isOffline);
+            }
             return;
         }
     }
@@ -1233,14 +1289,16 @@ function processLocationSignal(lat, lng, parsed) {
     }
 
     group.routeCoords.push({ lat, lng });
-    group.polyline.setPath(group.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
-    group.polyline.setMap((group.visible && showRoute) ? kakaoMap : null);
-
     createNewLogCard(station, newVisit);
-    renderPhoneFilterBar();
-    refreshTopDashboard();
-    applyLabelVisibilityRule();
-    if (!isRestoringHistory) playTacticalBeep(isOffline);
+
+    if (!isRestoringHistory) {
+        group.polyline.setPath(group.routeCoords.map(c => new kakao.maps.LatLng(c.lat, c.lng)));
+        group.polyline.setMap((group.visible && showRoute) ? kakaoMap : null);
+        renderPhoneFilterBar();
+        refreshTopDashboard();
+        applyLabelVisibilityRule();
+        playTacticalBeep(isOffline);
+    }
 }
 
 function getShortPhoneLabel(phone) {
@@ -1735,7 +1793,7 @@ function playTacticalBeep(isOffline) {
 })();
 
 // =====================================================================
-// ★ [익명 사용자 수 집계 & 제작자 전용 숨김 통계 팝업 모듈 - 3초 롱프레스 적용]
+// ★ [익명 사용자 수 집계 & 제작자 전용 숨김 관리자 패널 - 3초 롱프레스 적용]
 // =====================================================================
 (function initArgusAnonymousStats() {
     const NAMESPACE = 'argus_police_tracker_hsw';
@@ -1769,7 +1827,11 @@ function playTacticalBeep(isOffline) {
             if (pressTimer) clearTimeout(pressTimer);
             pressTimer = setTimeout(function() {
                 isLongPressTriggered = true;
-                openCreatorStatsModal();
+                if (typeof window.openAdminPanel === 'function') {
+                    window.openAdminPanel();
+                } else {
+                    openCreatorStatsModal();
+                }
             }, 3000);
         };
 
