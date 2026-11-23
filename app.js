@@ -1,5 +1,5 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 메인 애플리케이션 - 행동패턴 분석 & 관리자 샘플 생성기 연동 최종본] ★
+// ★ [아르고스(ARGUS) 메인 애플리케이션 - 실시간 활성 수사관 통계 & 패턴분석 연동본] ★
 // =====================================================================
 
 let kakaoMap = null;
@@ -370,7 +370,6 @@ function restoreHistoryFromStorage() {
         isRestoringHistory = false;
         saveHistoryToStorage();
 
-        // 복원 후 일괄 지도/UI 갱신
         phoneOrder.forEach(p => {
             const g = phoneGroups[p];
             if (g && g.polyline) {
@@ -392,7 +391,6 @@ function restoreHistoryFromStorage() {
     }
 }
 
-// ★ 관리자 샘플 생성기 고속 일괄 반영 함수
 window.batchImportSignals = function(batchList) {
     if (!Array.isArray(batchList) || batchList.length === 0) return;
     isRestoringHistory = true;
@@ -402,7 +400,6 @@ window.batchImportSignals = function(batchList) {
     isRestoringHistory = false;
     saveHistoryToStorage();
 
-    // 일괄 렌더링 마무리
     phoneOrder.forEach(p => {
         const g = phoneGroups[p];
         if (g && g.polyline) {
@@ -928,7 +925,6 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
             return;
         }
 
-        // 1) SKT 분할 문자 2부(예: "[Web발신] 06:33, N") 도착 여부 확인
         const tail = (typeof parseSktSplitTail === 'function') ? parseSktSplitTail(rawText) : null;
         if (tail) {
             if (pendingSktSplit) {
@@ -966,7 +962,6 @@ window.receiveSmsFromAndroid = function(rawText, isManualInput = false, senderNu
 
         const parsed = parseSmsContent(rawText, senderNumber);
 
-        // 2) SKT 분할 문자 1부(시간·Y/N 누락)가 자동 수신된 경우 3.5초 대기 후 병합/처리
         if (parsed.isIncompleteSkt && !isManualInput) {
             if (pendingSktSplit) clearTimeout(pendingSktSplit.timer);
             pendingSktSplit = {
@@ -1104,6 +1099,11 @@ function processLocationSignal(lat, lng, parsed) {
     const isEstimatedPos = !!parsed.isEstimatedPos;
     const btsAddress = parsed.btsAddress || '';
     const posAddress = parsed.posAddress || '';
+
+    // ★ 실제 추적 문자 수신 시 실시간 활성 수사관 카운트 핑 (시간당 1회 익명 집계)
+    if (!isRestoringHistory && typeof window.pingActiveTracker === 'function') {
+        window.pingActiveTracker();
+    }
 
     const historyIndex = savedSignalsHistory.length;
     savedSignalsHistory.push({
@@ -1793,18 +1793,57 @@ function playTacticalBeep(isOffline) {
 })();
 
 // =====================================================================
-// ★ [익명 사용자 수 집계 & 제작자 전용 숨김 관리자 패널 - 3초 롱프레스 적용]
+// ★ [익명 사용 통계 (누적 + 현재 추적 중 수사관 수) & 관리자 패널 트리거]
+// - counterapi.com 사용 (개인정보·문자내용 일절 미전송, 익명 카운트만 집계)
 // =====================================================================
 (function initArgusAnonymousStats() {
-    const NAMESPACE = 'argus_police_tracker_hsw';
-    const FIRST_VISIT_KEY = 'ARGUS_DEVICE_REGISTERED_V1';
+    const NAMESPACE = 'argus-police-hsw';
+    const FIRST_VISIT_KEY = 'ARGUS_DEVICE_REGISTERED_V2';
+    const ACTIVE_HOUR_KEY = 'ARGUS_ACTIVE_HOUR_PING_V1';
+    const ACTIVE_DAY_KEY  = 'ARGUS_ACTIVE_DAY_PING_V1';
+
+    window.ARGUS_STATS_NS = NAMESPACE;
+
+    // KST 기준 시간대·일자 키 생성 (예: h_2026112311 / d_20261123)
+    window.getArgusKstKeys = function(offsetHours = 0) {
+        const kstMs = Date.now() + (9 + offsetHours) * 3600000;
+        const d = new Date(kstMs);
+        const y = d.getUTCFullYear();
+        const m = pad2(d.getUTCMonth() + 1);
+        const day = pad2(d.getUTCDate());
+        const h = pad2(d.getUTCHours());
+        return {
+            hourKey: `h_${y}${m}${day}${h}`,
+            dayKey: `d_${y}${m}${day}`,
+            hourLabel: `${h}시`
+        };
+    };
+
+    // 실제 위치추적 문자 수신 시 호출: 현재 시간대·오늘 추적 참여 수사관 익명 카운트 (중복 방지)
+    window.pingActiveTracker = function() {
+        try {
+            const kst = window.getArgusKstKeys(0);
+            if (localStorage.getItem(ACTIVE_HOUR_KEY) !== kst.hourKey) {
+                fetch(`https://counterapi.com/api/${NAMESPACE}/active/${kst.hourKey}`)
+                    .then(res => { if (res.ok) localStorage.setItem(ACTIVE_HOUR_KEY, kst.hourKey); })
+                    .catch(() => {});
+            }
+            if (localStorage.getItem(ACTIVE_DAY_KEY) !== kst.dayKey) {
+                fetch(`https://counterapi.com/api/${NAMESPACE}/daily/${kst.dayKey}`)
+                    .then(res => { if (res.ok) localStorage.setItem(ACTIVE_DAY_KEY, kst.dayKey); })
+                    .catch(() => {});
+            }
+        } catch (e) {}
+    };
 
     window.addEventListener('DOMContentLoaded', function() {
-        fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches/up`).catch(() => {});
+        // 1. 누적 실행 횟수 +1
+        fetch(`https://counterapi.com/api/${NAMESPACE}/launches/total`).catch(() => {});
 
+        // 2. 최초 실행 기기 1회 등록 (+1)
         try {
             if (!localStorage.getItem(FIRST_VISIT_KEY)) {
-                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users/up`)
+                fetch(`https://counterapi.com/api/${NAMESPACE}/users/total`)
                     .then(res => {
                         if (res.ok) localStorage.setItem(FIRST_VISIT_KEY, 'true');
                     })
@@ -1812,6 +1851,7 @@ function playTacticalBeep(isOffline) {
             }
         } catch (e) {}
 
+        // 3. 버전 배지 3초 롱프레스 -> 관리자 패널 열기
         const verBadge = document.getElementById('header-ver-badge');
         if (!verBadge) return;
 
@@ -1829,8 +1869,6 @@ function playTacticalBeep(isOffline) {
                 isLongPressTriggered = true;
                 if (typeof window.openAdminPanel === 'function') {
                     window.openAdminPanel();
-                } else {
-                    openCreatorStatsModal();
                 }
             }, 3000);
         };
@@ -1858,30 +1896,4 @@ function playTacticalBeep(isOffline) {
         verBadge.addEventListener('mouseup', cancelPress);
         verBadge.addEventListener('mouseleave', cancelPress);
     });
-
-    async function openCreatorStatsModal() {
-        showAppAlert("📊 실시간 사용 통계를 불러오는 중입니다...", "🔐 제작자 전용 통계 (Admin)");
-        try {
-            const [userRes, launchRes] = await Promise.all([
-                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users`),
-                fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches`)
-            ]);
-
-            const userData = userRes.ok ? await userRes.json() : { count: 0 };
-            const launchData = launchRes.ok ? await launchRes.json() : { count: 0 };
-
-            const users = userData.count || 1;
-            const launches = launchData.count || 1;
-
-            const statsMsg =
-                `현재 전국에서 아르고스(ARGUS)를 사용 중인 현황입니다.\n\n` +
-                `👮 누적 사용 인원(기기): 총 ${users.toLocaleString()} 명\n` +
-                `🚀 누적 시스템 가동 횟수: 총 ${launches.toLocaleString()} 회\n\n` +
-                `※ 본 통계는 개인정보 없이 기기별 최초 1회 익명 카운트로만 집계됩니다.`;
-
-            showAppAlert(statsMsg, "🔐 아르고스(ARGUS) 배포 현황");
-        } catch (err) {
-            showAppAlert("통계 서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.", "⚠️ 조회 실패");
-        }
-    }
 })();

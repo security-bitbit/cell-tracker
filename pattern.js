@@ -1,16 +1,14 @@
 // =====================================================================
-// ★ [아르고스(ARGUS) 온디바이스 행동패턴 분석 & 관리자 샘플 생성기 v1.0] ★
+// ★ [아르고스(ARGUS) 온디바이스 행동패턴 분석 & 관리자 패널 v1.1] ★
 // - 100% 기기 내 로컬 연산 (외부 서버 전송 없음)
-// - 추적 기간(시간) 기반 신뢰도 판정 (5분/30분 간격 무관)
-// - 시간대별 거점(주거지/주간 거점) 자동 분류 및 핵심 활동반경(80%) 지도 표시
-// - 관리자 창(버전 3초 롱프레스): 1일~7일 현실 생활 패턴 샘플 생성기
+// - 전원 꺼짐 구간(위치·시간)은 거점·활동반경·신뢰도 산정에서 완전 제외
+// - 관리자 창: 실시간 추적 중 수사관 수(시간대별) + 누적 통계 + 샘플 생성기
 // =====================================================================
 
 let patternOverlays = [];
 let isPatternOverlayVisible = false;
 let lastPatternResult = null;
 
-// 1. 모달 HTML 및 전용 스타일 자동 주입 (style.css 별도 수정 불필요)
 window.addEventListener('DOMContentLoaded', function() {
     injectPatternStylesAndModals();
 });
@@ -44,6 +42,13 @@ function injectPatternStylesAndModals() {
         }
         .admin-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
         .admin-label { font-size:11px; color:#8ab8cc; display:block; margin-bottom:3px; }
+        .admin-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+        .admin-stat-box {
+            background:rgba(0,0,0,0.28); border:1px solid rgba(0,229,255,0.18);
+            border-radius:6px; padding:7px 9px;
+        }
+        .admin-stat-label { font-size:10px; color:#8ab8cc; }
+        .admin-stat-val { font-size:14px; font-weight:800; color:#ffffff; margin-top:2px; }
     `;
     document.head.appendChild(styleEl);
 
@@ -70,7 +75,7 @@ function injectPatternStylesAndModals() {
             </div>
         </div>
 
-        <!-- 모달 6: 제작자 전용 관리자 패널 (통계 + 테스트 샘플 생성기) -->
+        <!-- 모달 6: 제작자 전용 관리자 패널 (실시간 활성 + 누적 통계 + 샘플 생성기) -->
         <div id="admin-modal" class="modal-overlay" style="z-index: 9600;" onclick="if(event.target.id==='admin-modal') closeAdminModal()">
             <div class="modal-card" style="max-width:390px; max-height:86vh; overflow-y:auto;">
                 <div class="modal-header">
@@ -79,7 +84,10 @@ function injectPatternStylesAndModals() {
                 </div>
 
                 <div class="admin-section">
-                    <div class="pat-card-title" style="color:#00e5ff;">📊 실시간 배포 현황</div>
+                    <div class="pat-card-title" style="color:#00e5ff;">
+                        <span>📊 실시간 가동 · 배포 현황</span>
+                        <button class="btn" style="padding:2px 7px; font-size:10px;" onclick="refreshAdminStats()">🔄 새로고침</button>
+                    </div>
                     <div id="admin-stats-box" class="pat-row" style="color:#cceeff;">통계를 불러오는 중...</div>
                 </div>
 
@@ -130,7 +138,7 @@ function injectPatternStylesAndModals() {
 }
 
 // =====================================================================
-// ★ 2. 온디바이스 행동패턴 & 핵심 활동반경 분석 엔진
+// ★ 2. 온디바이스 행동패턴 & 핵심 활동반경 분석 엔진 (전원 꺼짐 구간 완전 제외)
 // =====================================================================
 window.openPatternModal = function() {
     if (!savedSignalsHistory || savedSignalsHistory.length === 0) {
@@ -167,56 +175,91 @@ window.closePatternModal = function() {
 };
 
 window.runPatternAnalysis = function(phoneKey) {
-    const signals = savedSignalsHistory
+    const allSignals = savedSignalsHistory
         .filter(s => s.phone === phoneKey)
         .slice()
         .sort((a, b) => a.dateMs - b.dateMs);
 
     const bodyEl = document.getElementById('pattern-body');
-    if (signals.length === 0) {
+    if (allSignals.length === 0) {
+        lastPatternResult = null;
         bodyEl.innerHTML = `<div class="pat-card"><div class="pat-row">선택한 대상자의 수신 데이터가 없습니다.</div></div>`;
         return;
     }
 
-    // 1) 추적 기간(시간) 기반 신뢰도 판정 (5분/30분 수신 간격과 무관하게 시간으로 평가)
-    const minMs = signals[0].dateMs;
-    const maxMs = signals[signals.length - 1].dateMs;
-    const spanHours = Math.max(0, (maxMs - minMs) / 3600000);
+    // ★ 전원 켜짐(활성) 신호와 꺼짐(오프라인) 신호 분리
+    const activeSignals = allSignals.filter(s => !s.isOffline);
+    const offlineSignals = allSignals.filter(s => s.isOffline);
+
+    if (activeSignals.length === 0) {
+        lastPatternResult = null;
+        bodyEl.innerHTML = `
+            <div class="pat-card" style="border-color:rgba(255,171,0,0.45);">
+                <div class="pat-card-title" style="color:#ffab00;">⚠️ 유효한 활성 위치 데이터 없음</div>
+                <div class="pat-row">현재 수신된 ${allSignals.length}건이 모두 <b>단말기 전원 꺼짐</b> 상태입니다.</div>
+                <div class="pat-sub">전원 꺼짐 중 기록된 위치는 생활반경 왜곡을 막기 위해 분석에서 제외됩니다. 단말기 전원이 켜진 뒤 수신 데이터가 쌓이면 자동으로 분석됩니다.</div>
+            </div>
+        `;
+        return;
+    }
+
+    // 1) 유효 추적 시간 계산 (전원 꺼짐 구간 완전 제외)
+    let activeDurationMin = 0;
+    let excludedOfflineMin = 0;
+    const activeWeights = new Map();
+
+    for (let i = 0; i < allSignals.length; i++) {
+        const curr = allSignals[i];
+        const prev = i > 0 ? allSignals[i - 1] : null;
+
+        if (!prev) {
+            if (!curr.isOffline) activeWeights.set(curr, 5);
+            continue;
+        }
+
+        const gapMin = Math.max(0, (curr.dateMs - prev.dateMs) / 60000);
+        if (prev.isOffline || curr.isOffline) {
+            // 꺼짐 구간은 유효 시간에서 제외하고 별도 집계
+            excludedOfflineMin += Math.min(gapMin, 720);
+            if (!curr.isOffline) activeWeights.set(curr, 5);
+        } else {
+            // 5분·15분·30분·60분 간격 자동 대응 (2시간 초과는 비연속 공백으로 보고 30분 캡)
+            const validGap = (gapMin <= 120) ? gapMin : 30;
+            activeDurationMin += validGap;
+            activeWeights.set(curr, (gapMin > 0 && gapMin <= 60) ? gapMin : 5);
+        }
+    }
+
+    const activeSpanHours = activeDurationMin / 60;
 
     let confLabel, confColor, confDesc;
-    if (spanHours < 6) {
+    if (activeSpanHours < 6) {
         confLabel = "낮음 (초기 참고용)";
         confColor = "#ff5252";
-        confDesc = "추적 기간 6시간 미만 — 주·야간 생활 패턴을 확정하기 이른 단계입니다.";
-    } else if (spanHours < 24) {
+        confDesc = "유효 추적 시간 6시간 미만 — 주·야간 생활 패턴을 확정하기 이른 단계입니다.";
+    } else if (activeSpanHours < 24) {
         confLabel = "보통 (단기 흐름)";
         confColor = "#ffab00";
-        confDesc = "추적 기간 6~24시간 — 당일 주요 이동 흐름과 단기 체류지 파악이 가능합니다.";
-    } else if (spanHours < 72) {
+        confDesc = "유효 추적 시간 6~24시간 — 당일 주요 이동 흐름과 단기 체류지 파악이 가능합니다.";
+    } else if (activeSpanHours < 66) {
         confLabel = "높음 (생활 패턴 포착)";
         confColor = "#00e5ff";
-        confDesc = "추적 기간 1~3일 — 취침지(주거지)와 주간 활동 거점이 뚜렷하게 구분됩니다.";
+        confDesc = "유효 추적 시간 1~3일 — 취침지(주거지)와 주간 활동 거점이 뚜렷하게 구분됩니다.";
     } else {
         confLabel = "매우 높음 (거점 확정 수준)";
         confColor = "#00e676";
-        confDesc = "추적 기간 3일 이상 — 반복 생활권 및 잠복 권장 시간대 신뢰도가 매우 높습니다.";
+        confDesc = "유효 추적 시간 약 3일 이상 — 반복 생활권 및 잠복 권장 시간대 신뢰도가 매우 높습니다.";
     }
 
-    const spanText = formatSpanHours(spanHours);
+    const spanText = formatSpanHours(activeSpanHours);
+    const excludedText = offlineSignals.length > 0
+        ? `꺼짐 ${offlineSignals.length}건(약 ${formatMinutes(excludedOfflineMin)}) 분석 제외됨`
+        : '전원 꺼짐 제외 구간 없음';
 
-    // 2) 공간 클러스터링 (반경 350m 이내 동일 거점으로 묶기)
+    // 2) 공간 클러스터링 — ★ 전원 켜짐(activeSignals) 데이터만 사용
     const clusters = [];
-    signals.forEach((sig, idx) => {
-        // 직전 신호와의 간격(분)으로 실제 체류 시간 가중치 계산 (5분·30분 간격 자동 대응, 최대 60분 캡)
-        let durMin = 5;
-        if (idx > 0) {
-            const gapMin = (sig.dateMs - signals[idx - 1].dateMs) / 60000;
-            if (gapMin > 0 && gapMin <= 60) durMin = gapMin;
-            else if (gapMin > 60) durMin = 30;
-        } else if (signals.length > 1) {
-            const firstGap = (signals[1].dateMs - sig.dateMs) / 60000;
-            durMin = (firstGap > 0 && firstGap <= 60) ? firstGap : 5;
-        }
+    activeSignals.forEach(sig => {
+        const durMin = activeWeights.get(sig) || 5;
 
         let targetCluster = null;
         let bestDist = Infinity;
@@ -293,11 +336,10 @@ window.runPatternAnalysis = function(phoneKey) {
         ? clusters.slice().sort((a, b) => b.eveningMin - a.eveningMin)[0]
         : null;
 
-    // 4) 핵심 활동반경(Core Activity Radius: 상위 80% 밀집 구역) 계산
-    // 원거리 일시 이탈(아웃라이어)에 흔들리지 않도록 Medoid(중앙 밀집점) 기준으로 상위 80% 추출
-    const sampleStep = Math.max(1, Math.floor(signals.length / 150));
+    // 4) 핵심 활동반경(상위 80% 밀집 구역) — ★ activeSignals만 산입
+    const sampleStep = Math.max(1, Math.floor(activeSignals.length / 150));
     const sampled = [];
-    for (let i = 0; i < signals.length; i += sampleStep) sampled.push(signals[i]);
+    for (let i = 0; i < activeSignals.length; i += sampleStep) sampled.push(activeSignals[i]);
 
     let medoid = sampled[0];
     let minSumDist = Infinity;
@@ -310,7 +352,7 @@ window.runPatternAnalysis = function(phoneKey) {
         }
     }
 
-    const withDist = signals.map(s => ({ s, d: calcDistKm(medoid.lat, medoid.lng, s.lat, s.lng) }))
+    const withDist = activeSignals.map(s => ({ s, d: calcDistKm(medoid.lat, medoid.lng, s.lat, s.lng) }))
         .sort((a, b) => a.d - b.d);
     const coreCount = Math.max(1, Math.ceil(withDist.length * 0.8));
     const coreSlice = withDist.slice(0, coreCount);
@@ -323,19 +365,18 @@ window.runPatternAnalysis = function(phoneKey) {
         if (d > coreRadiusKm) coreRadiusKm = d;
     }
     const coreRadiusM = Math.max(250, Math.round(coreRadiusKm * 1000));
-    const corePct = Math.round((coreSlice.length / signals.length) * 100);
+    const corePct = Math.round((coreSlice.length / activeSignals.length) * 100);
 
-    // 5) 전원 꺼짐 패턴 분석
-    const offlineSignals = signals.filter(s => s.isOffline);
+    // 5) 전원 꺼짐 패턴 (위치 산입 없이 시각 패턴만 참고용으로 요약)
     let offlineSummary = "전원 꺼짐 이력 없음";
     if (offlineSignals.length > 0) {
         const offHours = offlineSignals.map(s => new Date(s.dateMs).getHours());
         const avgOffH = Math.round(offHours.reduce((a, b) => a + b, 0) / offHours.length);
-        offlineSummary = `총 ${offlineSignals.length}건 감지 (주로 ${pad2(avgOffH)}시경 집중)`;
+        offlineSummary = `총 ${offlineSignals.length}건 감지 (주로 ${pad2(avgOffH)}시경 · 활동반경 산입 제외)`;
     }
 
     // 6) 권장 확인(잠복) 시간대 도출
-    let recommendText = "데이터가 더 누적되면 권장 시간대가 정밀화됩니다.";
+    let recommendText = "유효 추적 데이터가 더 누적되면 권장 시간대가 정밀화됩니다.";
     if (homeCluster && homeCluster.nightMin > 0) {
         const peakHomeHour = findPeakHourRange(homeCluster.hourHist);
         recommendText = `주거 추정지(${shortAddr(homeCluster.repAddress)})는 ${peakHomeHour} 체류 비중이 가장 높습니다.`;
@@ -345,11 +386,11 @@ window.runPatternAnalysis = function(phoneKey) {
         }
     }
 
-    // 결과 저장 (지도 표시 및 브리핑 복사용)
     lastPatternResult = {
         phoneKey,
         displayPhone: formatPhoneDisplay(phoneKey),
-        signalCount: signals.length,
+        signalCount: activeSignals.length,
+        offlineCount: offlineSignals.length,
         spanText,
         confLabel,
         coreLat,
@@ -368,7 +409,6 @@ window.runPatternAnalysis = function(phoneKey) {
         totalDayMin
     };
 
-    // 7) UI 렌더링
     const homePct = homeCluster && totalNightMin > 0 ? Math.round((homeCluster.nightMin / totalNightMin) * 100) : 0;
     const workPct = workCluster && totalDayMin > 0 ? Math.round((workCluster.dayMin / totalDayMin) * 100) : 0;
 
@@ -388,18 +428,19 @@ window.runPatternAnalysis = function(phoneKey) {
     bodyEl.innerHTML = `
         <div class="pat-card">
             <div class="pat-card-title">
-                <span>⏱️ 분석 기간 및 신뢰도</span>
+                <span>⏱️ 유효 추적 시간 및 신뢰도</span>
                 <span class="pat-badge" style="background:${confColor}22; color:${confColor}; border:1px solid ${confColor};">${confLabel}</span>
             </div>
-            <div class="pat-row">• <b>추적 기간:</b> ${spanText} (총 ${signals.length.toLocaleString()}건 수신)</div>
-            <div class="pat-sub">${confDesc}</div>
+            <div class="pat-row">• <b>유효 추적 시간:</b> ${spanText} (정상 신호 ${activeSignals.length.toLocaleString()}건)</div>
+            <div class="pat-sub">• ${excludedText}</div>
+            <div class="pat-sub" style="margin-top:2px;">${confDesc}</div>
         </div>
 
         <div class="pat-card" style="border-color:rgba(179,136,255,0.45);">
             <div class="pat-card-title" style="color:#d1b3ff;">⭕ 핵심 활동반경 (주요 생활권)</div>
             <div class="pat-row">• <b>반경 규모:</b> 중심점 기준 약 <b>${coreRadiusM >= 1000 ? (coreRadiusM / 1000).toFixed(2) + ' km' : coreRadiusM + ' m'}</b></div>
-            <div class="pat-row">• <b>집중도:</b> 전체 포착 신호의 <b>${corePct}%</b>가 이 생활권 안에 집중됨</div>
-            <div class="pat-sub">※ 일시적 원거리 이동(상위 20%)을 제외하고 실제 생활 반경을 산출했습니다.</div>
+            <div class="pat-row">• <b>집중도:</b> 정상 포착 신호의 <b>${corePct}%</b>가 이 생활권 안에 집중됨</div>
+            <div class="pat-sub">※ 전원 꺼짐 위치 및 일시적 원거리 이동(상위 20%)은 제외했습니다.</div>
         </div>
 
         <div class="pat-card">
@@ -435,7 +476,6 @@ window.runPatternAnalysis = function(phoneKey) {
     updatePatternMapButtonLabel();
 };
 
-// 지도 위 핵심 활동반경 + 주거지/주간 거점 오버레이 토글
 window.toggleActivityRadiusOnMap = function() {
     if (!kakaoMap || !lastPatternResult) return;
 
@@ -450,7 +490,6 @@ window.toggleActivityRadiusOnMap = function() {
     const r = lastPatternResult;
     const center = new kakao.maps.LatLng(r.coreLat, r.coreLng);
 
-    // 1) 핵심 활동반경 원
     const coreCircle = new kakao.maps.Circle({
         map: kakaoMap,
         center: center,
@@ -464,7 +503,6 @@ window.toggleActivityRadiusOnMap = function() {
     });
     patternOverlays.push(coreCircle);
 
-    // 2) 활동반경 라벨
     const radiusLabelStr = r.coreRadiusM >= 1000 ? `${(r.coreRadiusM / 1000).toFixed(2)}km` : `${r.coreRadiusM}m`;
     const coreLabel = new kakao.maps.CustomOverlay({
         map: kakaoMap,
@@ -476,7 +514,6 @@ window.toggleActivityRadiusOnMap = function() {
     });
     patternOverlays.push(coreLabel);
 
-    // 3) 주거지 추정 마커
     if (r.homeCluster) {
         const homeOverlay = new kakao.maps.CustomOverlay({
             map: kakaoMap,
@@ -489,7 +526,6 @@ window.toggleActivityRadiusOnMap = function() {
         patternOverlays.push(homeOverlay);
     }
 
-    // 4) 주간 거점 추정 마커 (주거지와 다른 곳일 때)
     if (r.workCluster && !r.isSameHomeWork) {
         const workOverlay = new kakao.maps.CustomOverlay({
             map: kakaoMap,
@@ -533,7 +569,7 @@ window.copyPatternBriefing = function() {
     const text =
         `[ARGUS 행동패턴 분석 브리핑]\n` +
         `• 대상: 📱 ${r.displayPhone}\n` +
-        `• 추적 기간: ${r.spanText} (총 ${r.signalCount}건 / 신뢰도: ${r.confLabel})\n` +
+        `• 유효 추적 시간: ${r.spanText} (정상 ${r.signalCount}건 / 꺼짐 ${r.offlineCount}건 제외 · 신뢰도: ${r.confLabel})\n` +
         `• 핵심 활동반경: 약 ${radStr} (신호 ${r.corePct}% 집중)\n` +
         `• 주거지 추정(심야): ${homeStr}\n` +
         `• 주간 거점(09~18시): ${workStr}\n` +
@@ -611,30 +647,84 @@ function findPeakHourRange(hourHist) {
 }
 
 // =====================================================================
-// ★ 3. 관리자 패널 (배포 통계 + 현실형 생활 패턴 샘플 생성기)
+// ★ 3. 관리자 패널 (실시간 추적 중 수사관 수 + 누적 통계 + 샘플 생성기)
 // =====================================================================
-window.openAdminPanel = async function() {
+async function fetchCounterVal(action, key) {
+    const ns = window.ARGUS_STATS_NS || 'argus-police-hsw';
+    try {
+        const res = await fetch(`https://counterapi.com/api/${ns}/${action}/${key}?readOnly=true`, { cache: 'no-store' });
+        if (!res.ok) return 0;
+        const data = await res.json();
+        return Number(data.value ?? data.count ?? 0) || 0;
+    } catch (e) {
+        return null;
+    }
+}
+
+window.refreshAdminStats = async function() {
+    const statsBox = document.getElementById('admin-stats-box');
+    if (!statsBox) return;
+    statsBox.innerHTML = '📊 실시간 가동 현황을 불러오는 중...';
+
+    const currKst = window.getArgusKstKeys ? window.getArgusKstKeys(0) : null;
+    const prevKst = window.getArgusKstKeys ? window.getArgusKstKeys(-1) : null;
+
+    if (!currKst || !prevKst) {
+        statsBox.innerHTML = '<span style="color:#ffab00;">통계 모듈 초기화 중입니다.</span>';
+        return;
+    }
+
+    const [activeNow, activePrev, activeToday, totalUsers, totalLaunches] = await Promise.all([
+        fetchCounterVal('active', currKst.hourKey),
+        fetchCounterVal('active', prevKst.hourKey),
+        fetchCounterVal('daily', currKst.dayKey),
+        fetchCounterVal('users', 'total'),
+        fetchCounterVal('launches', 'total')
+    ]);
+
+    if (totalUsers === null && totalLaunches === null) {
+        statsBox.innerHTML = `<span style="color:#ffab00;">통계 서버 연결 실패 (네트워크 확인 필요)</span>`;
+        return;
+    }
+
+    const nowVal = activeNow || 0;
+    const prevVal = activePrev || 0;
+    const todayVal = activeToday || 0;
+    const usersVal = totalUsers || 0;
+    const launchVal = totalLaunches || 0;
+
+    statsBox.innerHTML = `
+        <div class="admin-stat-grid">
+            <div class="admin-stat-box" style="border-color:rgba(0,230,118,0.45);">
+                <div class="admin-stat-label">🟢 현재 추적 중 (${currKst.hourLabel})</div>
+                <div class="admin-stat-val" style="color:#00e676;">${nowVal.toLocaleString()} 명</div>
+                <div class="pat-sub" style="font-size:9.5px;">직전(${prevKst.hourLabel}): ${prevVal.toLocaleString()}명</div>
+            </div>
+            <div class="admin-stat-box" style="border-color:rgba(0,229,255,0.4);">
+                <div class="admin-stat-label">📅 오늘 추적 참여</div>
+                <div class="admin-stat-val" style="color:#00e5ff;">${todayVal.toLocaleString()} 명</div>
+                <div class="pat-sub" style="font-size:9.5px;">문자 수신 기준(중복제외)</div>
+            </div>
+            <div class="admin-stat-box">
+                <div class="admin-stat-label">👮 누적 사용 기기</div>
+                <div class="admin-stat-val">${usersVal.toLocaleString()} 대</div>
+            </div>
+            <div class="admin-stat-box">
+                <div class="admin-stat-label">🚀 누적 실행 횟수</div>
+                <div class="admin-stat-val">${launchVal.toLocaleString()} 회</div>
+            </div>
+        </div>
+        <div class="pat-sub" style="margin-top:6px; font-size:10px; line-height:1.4;">
+            ※ '현재 추적 중'은 해당 시간대에 위치추적 문자를 1건 이상 수신한 기기 수입니다. (개인정보·문자내용 미전송)
+        </div>
+    `;
+};
+
+window.openAdminPanel = function() {
     const modal = document.getElementById('admin-modal');
     if (!modal) return;
     modal.style.display = 'flex';
-
-    const statsBox = document.getElementById('admin-stats-box');
-    statsBox.innerHTML = '📊 실시간 사용 통계를 불러오는 중...';
-
-    const NAMESPACE = 'argus_police_tracker_hsw';
-    try {
-        const [userRes, launchRes] = await Promise.all([
-            fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/unique_users`),
-            fetch(`https://api.counterapi.dev/v1/${NAMESPACE}/total_launches`)
-        ]);
-        const userData = userRes.ok ? await userRes.json() : { count: 0 };
-        const launchData = launchRes.ok ? await launchRes.json() : { count: 0 };
-        statsBox.innerHTML =
-            `👮 누적 사용 인원(기기): <b>${(userData.count || 1).toLocaleString()} 명</b><br>` +
-            `🚀 누적 시스템 가동 횟수: <b>${(launchData.count || 1).toLocaleString()} 회</b>`;
-    } catch (e) {
-        statsBox.innerHTML = `<span style="color:#ffab00;">통계 서버 연결 실패 (오프라인 상태)</span>`;
-    }
+    window.refreshAdminStats();
 };
 
 window.closeAdminModal = function() {
@@ -642,7 +732,6 @@ window.closeAdminModal = function() {
     if (modal) modal.style.display = 'none';
 };
 
-// 카카오맵 키워드 검색으로 실제 좌표 조회 (실패 시 폴백 좌표 사용)
 function resolvePlaceCoord(keyword, fallback) {
     return new Promise(resolve => {
         if (!kakaoPlaces) {
@@ -676,7 +765,6 @@ window.generateRealisticSampleData = async function() {
     btn.innerText = "⏳ 실제 좌표 조회 및 샘플 생성 중...";
 
     try {
-        // 1) 실제 카카오맵 좌표 자동 조회
         const [homePlace, workPlace, lunchPlace, eveningPlace] = await Promise.all([
             resolvePlaceCoord('인천 계양 코아루아파트', {
                 lat: 37.5305, lng: 126.7224, address: '인천 계양구 효성동 코아루아파트'
@@ -692,7 +780,6 @@ window.generateRealisticSampleData = async function() {
             })
         ]);
 
-        // 2) 지금 시각 기준 과거 N일 ~ 현재까지 시간순 샘플 생성
         const nowMs = Date.now();
         const startMs = nowMs - (days * 24 * 60 * 60 * 1000);
         const stepMs = intervalMin * 60 * 1000;
@@ -701,61 +788,47 @@ window.generateRealisticSampleData = async function() {
 
         for (let t = startMs; t <= nowMs; t += stepMs) {
             const d = new Date(t);
-            const dow = d.getDay(); // 0:일, 6:토
+            const dow = d.getDay();
             const isWeekend = (dow === 0 || dow === 6);
             const hm = d.getHours() * 60 + d.getMinutes();
 
             let spot = homePlace;
             let pci = '281';
             let btsAddr = homePlace.address;
-            let jitterM = 14; // 체류 시 14m 이내 미세 흔들림 (동일 거점 체류로 자연 병합)
+            let jitterM = 14;
             let isOffline = false;
 
             if (!isWeekend) {
-                // 평일 생활 패턴
                 if (hm < 460) {
-                    // 00:00 ~ 07:40 취침 (코아루아파트)
                     spot = homePlace; pci = '281';
-                    // 가끔 새벽 02:00~02:20 단말기 전원 꺼짐 이벤트 시뮬레이션
                     if (d.getDate() % 2 === 0 && hm >= 120 && hm < 140) isOffline = true;
                 } else if (hm < 500) {
-                    // 07:40 ~ 08:20 출근 이동 (코아루 -> 계양경찰서 보간)
                     const ratio = (hm - 460) / 40;
                     spot = interpolatePlace(homePlace, workPlace, ratio, '인천 계양구 이동 구간 (출근)');
                     pci = ratio < 0.5 ? '281' : '415';
                     jitterM = 25;
                 } else if (hm < 720) {
-                    // 08:20 ~ 12:00 오전 근무 (인천계양경찰서)
                     spot = workPlace; pci = '415';
                 } else if (hm < 780) {
-                    // 12:00 ~ 13:00 점심 외출 (계산역 인근 식당가)
                     spot = lunchPlace; pci = '312';
                 } else if (hm < 1080) {
-                    // 13:00 ~ 18:00 오후 근무 (인천계양경찰서)
                     spot = workPlace; pci = '415';
                 } else if (hm < 1120) {
-                    // 18:00 ~ 18:40 퇴근 이동
                     const ratio = (hm - 1080) / 40;
                     spot = interpolatePlace(workPlace, homePlace, ratio, '인천 계양구 이동 구간 (퇴근)');
                     pci = ratio < 0.5 ? '415' : '281';
                     jitterM = 25;
                 } else if (hm < 1230 && d.getDate() % 2 === 1) {
-                    // 격일 저녁 18:40 ~ 20:30 상권 외출 후 귀가
                     spot = eveningPlace; pci = '319';
                 } else {
-                    // 20:30 ~ 24:00 귀가 및 휴식 (코아루아파트)
                     spot = homePlace; pci = '281';
                 }
             } else {
-                // 주말 생활 패턴
                 if (hm < 660) {
-                    // 00:00 ~ 11:00 코아루아파트 휴식
                     spot = homePlace; pci = '281';
                 } else if (hm < 960) {
-                    // 11:00 ~ 16:00 인근 상권·외곽 외출
                     spot = eveningPlace; pci = '319';
                 } else {
-                    // 16:00 ~ 24:00 코아루아파트 귀가
                     spot = homePlace; pci = '281';
                 }
             }
@@ -784,7 +857,6 @@ window.generateRealisticSampleData = async function() {
             });
         }
 
-        // 3) 고속 일괄 반영
         if (typeof window.batchImportSignals === 'function') {
             window.batchImportSignals(batchList);
         }
